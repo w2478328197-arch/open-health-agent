@@ -65,6 +65,29 @@ def test_cli_help_lists_core_workflows() -> None:
         assert field in record_help.stdout
 
 
+def test_emit_round_trips_unicode_through_an_ascii_only_console(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class AsciiOnlyStream:
+        def __init__(self) -> None:
+            self.value = ""
+
+        def write(self, value: str) -> int:
+            value.encode("ascii")
+            self.value += value
+            return len(value)
+
+        def flush(self) -> None:
+            return None
+
+    stream = AsciiOnlyStream()
+    monkeypatch.setattr(sys, "stdout", stream)
+
+    health_cli.emit({"工作簿": "健康档案.xlsx"})
+
+    assert json.loads(stream.value) == {"工作簿": "健康档案.xlsx"}
+
+
 @pytest.mark.skipif(not TEMPLATE.exists(), reason="workbook asset is still being generated")
 def test_cli_private_end_to_end_with_synthetic_ghealth(tmp_path: Path) -> None:
     home = tmp_path / "private-health-home"

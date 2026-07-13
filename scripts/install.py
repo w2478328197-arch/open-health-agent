@@ -276,8 +276,16 @@ def installer_lock(
             if acquired:
                 break
             if time.monotonic() >= deadline:
-                os.lseek(descriptor, 0, os.SEEK_SET)
-                owner = os.read(descriptor, 512).decode("utf-8", errors="replace").strip()
+                try:
+                    os.lseek(descriptor, 0, os.SEEK_SET)
+                    owner = os.read(descriptor, 512).decode(
+                        "utf-8", errors="replace"
+                    ).strip()
+                except OSError:
+                    # Windows denies reads that overlap another process's
+                    # mandatory byte-range lock. The lock state is sufficient;
+                    # owner metadata is only optional diagnostic context.
+                    owner = ""
                 detail = f" ({owner})" if owner else ""
                 raise InstallError(f"another Open Health Agent installation is still running{detail}")
             time.sleep(max(poll_seconds, 0.01))

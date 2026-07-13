@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import plistlib
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -40,7 +40,9 @@ def test_linux_scheduler_definition_status_and_uninstall(
 
     patch_home(monkeypatch, host_home)
     monkeypatch.setattr(scheduler.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(scheduler, "_entrypoint", lambda: Path("/opt/oha/health_agent.py"))
+    monkeypatch.setattr(
+        scheduler, "_entrypoint", lambda: PurePosixPath("/opt/oha/health_agent.py")
+    )
 
     calls: list[list[str]] = []
 
@@ -102,7 +104,9 @@ def test_linux_status_warns_when_user_linger_is_off(
     config = create_config(tmp_path / "private", timezone="UTC", ghealth_command=str(executable))
     patch_home(monkeypatch, host_home)
     monkeypatch.setattr(scheduler.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(scheduler, "_entrypoint", lambda: Path("/opt/oha/health_agent.py"))
+    monkeypatch.setattr(
+        scheduler, "_entrypoint", lambda: PurePosixPath("/opt/oha/health_agent.py")
+    )
     monkeypatch.setattr(
         scheduler,
         "_run",
@@ -132,7 +136,9 @@ def test_linux_status_is_not_installed_when_timer_is_inactive(
     config = create_config(tmp_path / "private", timezone="UTC", ghealth_command=str(executable))
     patch_home(monkeypatch, host_home)
     monkeypatch.setattr(scheduler.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(scheduler, "_entrypoint", lambda: Path("/opt/oha/health_agent.py"))
+    monkeypatch.setattr(
+        scheduler, "_entrypoint", lambda: PurePosixPath("/opt/oha/health_agent.py")
+    )
 
     def fake_run(command: list[str]) -> tuple[int, str]:
         if "is-active" in command:
@@ -166,7 +172,9 @@ def test_macos_scheduler_and_keepawake_lifecycle(
     config = create_config(tmp_path / "private", timezone="UTC", ghealth_command=str(executable))
     patch_home(monkeypatch, host_home)
     monkeypatch.setattr(scheduler.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(scheduler, "_entrypoint", lambda: Path("/opt/oha/health_agent.py"))
+    monkeypatch.setattr(
+        scheduler, "_entrypoint", lambda: PurePosixPath("/opt/oha/health_agent.py")
+    )
     monkeypatch.setattr(scheduler, "_run", lambda _command: (0, "ok"))
 
     result = scheduler.install_macos(config, 3600)
@@ -405,7 +413,9 @@ def test_linux_install_pins_selected_profile(
     config = create_config(tmp_path / "private", timezone="UTC")
     patch_home(monkeypatch, host_home)
     monkeypatch.setattr(scheduler.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(scheduler, "_entrypoint", lambda: Path("/opt/oha/health_agent.py"))
+    monkeypatch.setattr(
+        scheduler, "_entrypoint", lambda: PurePosixPath("/opt/oha/health_agent.py")
+    )
     monkeypatch.setattr(scheduler, "_run", lambda _command: (0, "ok"))
 
     result = scheduler.install_linux(config, 3600, "athlete-1")
@@ -422,7 +432,9 @@ def test_linux_install_enable_failure_restores_previous_definitions_and_state(
     config = create_config(tmp_path / "private", timezone="UTC")
     patch_home(monkeypatch, host_home)
     monkeypatch.setattr(scheduler.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(scheduler, "_entrypoint", lambda: Path("/opt/oha/health_agent.py"))
+    monkeypatch.setattr(
+        scheduler, "_entrypoint", lambda: PurePosixPath("/opt/oha/health_agent.py")
+    )
     user_dir = host_home / ".config" / "systemd" / "user"
     user_dir.mkdir(parents=True)
     service = user_dir / "open-health-agent-sync.service"
@@ -457,7 +469,9 @@ def test_linux_first_install_enable_failure_leaves_no_definitions(
     config = create_config(tmp_path / "private", timezone="UTC")
     patch_home(monkeypatch, host_home)
     monkeypatch.setattr(scheduler.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(scheduler, "_entrypoint", lambda: Path("/opt/oha/health_agent.py"))
+    monkeypatch.setattr(
+        scheduler, "_entrypoint", lambda: PurePosixPath("/opt/oha/health_agent.py")
+    )
 
     def fake_run(command: list[str]) -> tuple[int, str]:
         if "enable" in command:
@@ -481,7 +495,9 @@ def test_linux_install_reload_failure_restores_previous_definitions(
     config = create_config(tmp_path / "private", timezone="UTC")
     patch_home(monkeypatch, host_home)
     monkeypatch.setattr(scheduler.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(scheduler, "_entrypoint", lambda: Path("/opt/oha/health_agent.py"))
+    monkeypatch.setattr(
+        scheduler, "_entrypoint", lambda: PurePosixPath("/opt/oha/health_agent.py")
+    )
     user_dir = host_home / ".config" / "systemd" / "user"
     user_dir.mkdir(parents=True)
     service = user_dir / "open-health-agent-sync.service"
@@ -516,7 +532,9 @@ def test_macos_install_bootstrap_failure_restores_previous_definition(
     config = create_config(tmp_path / "private", timezone="UTC")
     patch_home(monkeypatch, host_home)
     monkeypatch.setattr(scheduler.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(scheduler, "_entrypoint", lambda: Path("/opt/oha/health_agent.py"))
+    monkeypatch.setattr(
+        scheduler, "_entrypoint", lambda: PurePosixPath("/opt/oha/health_agent.py")
+    )
     path = host_home / "Library" / "LaunchAgents" / f"{scheduler.SYNC_LABEL}.plist"
     path.parent.mkdir(parents=True)
     old_payload = plistlib.dumps({"Label": scheduler.SYNC_LABEL, "Old": True})

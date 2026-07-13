@@ -73,7 +73,10 @@ class PrivateArgumentParser(argparse.ArgumentParser):
 def emit(value: Any, *, quiet: bool = False) -> None:
     if quiet:
         return
-    print(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, default=str))
+    # Keep the command's JSON byte stream portable even when a Windows console
+    # is still using a legacy code page. JSON consumers recover the exact
+    # Unicode text from escapes instead of the CLI failing after a safe write.
+    print(json.dumps(value, ensure_ascii=True, indent=2, sort_keys=True, default=str))
 
 
 def local_timezone_name() -> str:
@@ -1018,7 +1021,7 @@ def main() -> int:
         print("interrupted", file=sys.stderr)
         return 130
     except Exception as exc:
-        print(json.dumps(_public_exception_payload(exc), ensure_ascii=False), file=sys.stderr)
+        print(json.dumps(_public_exception_payload(exc), ensure_ascii=True), file=sys.stderr)
         return 1
 
 
