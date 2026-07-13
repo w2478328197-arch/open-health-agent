@@ -1,0 +1,10 @@
+{
+  "dataPoints": [
+    {
+      "date": "2026-01-02",
+      "time": "2026-01-02T07:30:00+00:00",
+      "weightGrams": 72000,
+      "source": {"name": "synthetic.scale"}
+    }
+  ]
+}

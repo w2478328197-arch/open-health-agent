@@ -1,0 +1,20 @@
+{
+  "dataPoints": [
+    {
+      "id": "synthetic-secondary-sleep",
+      "start": "2026-01-01T22:15:00+00:00",
+      "end": "2026-01-02T06:45:00+00:00",
+      "totalMinutes": 510,
+      "stageMinutes": {"DEEP": 90, "LIGHT": 260, "REM": 120, "AWAKE": 40},
+      "source": {"name": "secondary.sleep"}
+    },
+    {
+      "id": "synthetic-preferred-sleep",
+      "start": "2026-01-01T23:00:00+00:00",
+      "end": "2026-01-02T06:30:00+00:00",
+      "totalMinutes": 450,
+      "stageMinutes": {"DEEP": 80, "CORE": 230, "REM": 105, "AWAKE": 35},
+      "source": {"name": "preferred.sleep"}
+    }
+  ]
+}

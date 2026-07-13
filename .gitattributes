@@ -1,0 +1,11 @@
+*.xlsx binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.heic binary
+*.wav binary
+*.m4a binary
+*.mp3 binary
+*.sh text eol=lf
+*.py text eol=lf
+*.md text eol=lf

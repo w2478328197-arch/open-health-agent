@@ -1,0 +1,10 @@
+{
+  "dataPoints": [
+    {
+      "date": "2026-01-02",
+      "time": "2026-01-02T07:00:00+00:00",
+      "beatsPerMinute": 58,
+      "source": {"name": "synthetic.watch"}
+    }
+  ]
+}

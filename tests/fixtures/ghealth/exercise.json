@@ -1,0 +1,16 @@
+{
+  "dataPoints": [
+    {
+      "id": "synthetic-workout-001",
+      "start": "2026-01-02T10:00:00+00:00",
+      "displayName": "Strength training",
+      "activeDuration": "2700s",
+      "metricsSummary": {
+        "caloriesKcal": 220,
+        "averageHeartRateBeatsPerMinute": 112,
+        "maxHeartRateBeatsPerMinute": 148
+      },
+      "source": {"name": "synthetic.watch"}
+    }
+  ]
+}

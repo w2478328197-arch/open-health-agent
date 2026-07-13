@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.10"
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: macos-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.12"
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            skills/open-health-agent/scripts/requirements.txt
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r skills/open-health-agent/scripts/requirements.txt
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt
+
+      - name: Validate shell installers
+        if: runner.os != 'Windows'
+        run: |
+          sh -n install.sh
+          sh -n scripts/install_ghealth.sh
+          grep -Fq 'https://github.com/Google-Health-API/google-health-cli.git' scripts/install_ghealth.sh
+          grep -Fq '6dad482c528b91d6562eadc829fd3e717df5b75a' scripts/install_ghealth.sh
+          scripts/install_ghealth.sh --dry-run
+
+      - name: Compile Python sources
+        run: python -m compileall -q scripts skills/open-health-agent/scripts
+
+      - name: Validate repository
+        run: python scripts/validate_repository.py
+
+      - name: Scan tracked content for common secrets
+        run: python scripts/check_secrets.py
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Smoke-test safe, idempotent installation
+        if: runner.os == 'Linux'
+        run: |
+          ./install.sh \
+            --skill-dir "$RUNNER_TEMP/skills" \
+            --runtime-dir "$RUNNER_TEMP/runtime" \
+            --bin-dir "$RUNNER_TEMP/bin" \
+            --home "$RUNNER_TEMP/private-health" \
+            --timezone UTC
+          printf '\nPRIVATE RULE SENTINEL\n' >> "$RUNNER_TEMP/private-health/AGENTS.md"
+          printf '\n' >> "$RUNNER_TEMP/private-health/profile.json"
+          agents_before=$(sha256sum "$RUNNER_TEMP/private-health/AGENTS.md" | cut -d ' ' -f 1)
+          profile_before=$(sha256sum "$RUNNER_TEMP/private-health/profile.json" | cut -d ' ' -f 1)
+          ./install.sh \
+            --skill-dir "$RUNNER_TEMP/skills" \
+            --runtime-dir "$RUNNER_TEMP/runtime" \
+            --bin-dir "$RUNNER_TEMP/bin" \
+            --home "$RUNNER_TEMP/private-health" \
+            --timezone Asia/Shanghai
+          test "$agents_before" = "$(sha256sum "$RUNNER_TEMP/private-health/AGENTS.md" | cut -d ' ' -f 1)"
+          test "$profile_before" = "$(sha256sum "$RUNNER_TEMP/private-health/profile.json" | cut -d ' ' -f 1)"
+          test "$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["timezone"])' "$RUNNER_TEMP/private-health/config.json")" = "UTC"
+          test -f "$RUNNER_TEMP/skills/open-health-agent/SKILL.md"
+          test -x "$RUNNER_TEMP/bin/open-health-agent"
+          test -f "$RUNNER_TEMP/private-health/config.json"
+          test "$(stat -c '%a' "$RUNNER_TEMP/private-health/config.json")" = "600"

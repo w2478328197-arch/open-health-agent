@@ -1,0 +1,4 @@
+interface:
+  display_name: "Open Health Agent"
+  short_description: "Personal health ledger and context-aware coaching"
+  default_prompt: "Use $open-health-agent to onboard me and set up a private health ledger."

@@ -1,0 +1,11 @@
+{
+  "age_group": null,
+  "field_provenance": {},
+  "goals": [],
+  "health_constraints": [],
+  "lean_mass_kg": null,
+  "life_stage": null,
+  "medications_affecting_exercise": [],
+  "portion_mode": "range",
+  "updated_at": null
+}
