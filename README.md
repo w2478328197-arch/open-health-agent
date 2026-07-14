@@ -1,6 +1,11 @@
 # Open Health Agent
 
+[![Version](https://img.shields.io/badge/version-0.1.0-5b4bdb)](skills/open-health-agent/scripts/oha/constants.py)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/license-Apache--2.0-4c1.svg)](LICENSE)
 [![CI](https://github.com/w2478328197-arch/open-health-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/w2478328197-arch/open-health-agent/actions/workflows/ci.yml)
+
+[English](README_EN.md) · [简体中文](README.md) · [安全政策](SECURITY.zh-CN.md) · [隐私说明](PRIVACY.zh-CN.md)
 
 把 Hermes、微信、Google Health、可穿戴设备和 Excel 串成一个本地优先的个人运动健康 Agent。
 
@@ -51,7 +56,7 @@ flowchart LR
 
 ## 真实支持范围
 
-“支持某品牌”不等于“该品牌的全部指标都能导入”。一个指标只有同时满足以下条件才可用：
+本项目**不维护硬件白名单**。“支持某品牌”不等于“该品牌的全部型号、地区和指标都能导入”。一个指标只有同时满足以下条件才可用：
 
 1. 设备把该指标同步到厂商 App；
 2. 厂商链路把它写入 Google Health 接受的数据源；
@@ -60,15 +65,53 @@ flowchart LR
 5. Google Health API 实际返回它；
 6. Open Health Agent 当前适配器已经映射该类型。
 
-当前自动导入映射包括 14 类查询：步数、距离、活动热量、活动分钟、静息心率、HRV、血氧、呼吸率、VO₂ max、体重、体脂、身高、睡眠和训练。Google Health 或 `ghealth` 支持但本适配器尚未映射的数据，不会自动进入档案。
+[`ghealth`](https://github.com/Google-Health-API/google-health-cli) 当前声明 40 类经过真实 API 验证的数据类型，覆盖活动、连续/每日生命体征、身体测量、睡眠、训练、血糖、ECG、体温、饮水和营养等；可用 `ghealth schema types` 查看安装版本的完整清单。**这不等于本项目已经自动导入全部 40 类。** Open Health Agent 当前只映射以下 14 类查询：
 
-Google 的[设备连接说明](https://support.google.com/googlehealth/answer/14236613?hl=en-GB)会按品牌列出指标差异。例如其当前表格显示，小米链路可共享步数、距离、能量、睡眠、训练和体重等，但不共享 HRV、呼吸率、SpO₂ 或 VO₂ max。缺数据时先检查手机端，不能把空值写成 0。
+`steps`、`distance`、`active-energy-burned`、`active-minutes`、`daily-resting-heart-rate`、`daily-heart-rate-variability`、`daily-oxygen-saturation`、`daily-respiratory-rate`、`daily-vo2-max`、`weight`、`body-fat`、`height`、`sleep --detail`、`exercise`。
 
-| 能力 | 最低要求 | 没有时的行为 |
+因此，全天连续心率、楼层、海拔、心率区间、久坐、游泳、基础/总热量、血糖、体温、睡眠温度、ECG、不规则心律通知以及 Google Health 中的饮水/营养日志等，即使 `ghealth` 能查询，当前也不会由 OHA 自动写入。训练记录中可能带平均/最高心率，但这不等于已导入全天心率。缺失日期和空结果必须保留为空，不能当成 0。
+
+### Google Health 官方列出的设备路径
+
+下表是 Google 截至 **2026-07-14** 公布的代表性链路与明确缺口，不是本项目对硬件的认证。最终仍要在同一账号的 Google Health 中看到目标指标，再逐项用 `ghealth`/OHA 验收。型号、系统版本、地区、订阅和权限都可能改变结果。
+
+| 设备/来源 | 到 Google Health 的路径 | Google 列出的代表性数据 | Google 明确列出的缺口或条件 |
+|---|---|---|---|
+| Fitbit / Pixel Watch | Google 第一方设备路径 | 步数、距离、睡眠、训练、静息心率；部分型号/地区还有 HRV、SpO₂、呼吸率 | 数据取决于设备型号、地区和资格；OHA 当前不映射全天心率、皮温、ECG 或不规则心律 |
+| Apple Watch | Apple Watch → Apple Health → Google Health | 步数、楼层、距离、总能量、睡眠、训练/路线、体重/身体测量、VO₂ max、心率和夜间生命体征 | 暂无运动分钟、站立小时、ECG/不规则心律提醒和全天生命体征 |
+| Garmin | Garmin → Garmin Connect → Health Connect / Apple Health → Google Health | 步数、距离、楼层、能量、睡眠、训练摘要、心率/静息心率、体重 | 不共享 HRV、呼吸率、SpO₂、VO₂ max、皮温、分钟/小时能量、路线和分圈 |
+| Mi Fitness / Xiaomi | Xiaomi → Mi Fitness → Health Connect → Google Health；仅 Android | 运动中心率、步数、距离、能量、睡眠、训练摘要/地图、体重 | 不共享 HRV、呼吸率、SpO₂、VO₂ max、皮温、运动外心率和分钟/小时距离/能量 |
+| Samsung Galaxy Watch | Galaxy Watch → Samsung Health → Health Connect → Google Health；仅 Android | 步数、距离、能量、睡眠、训练、心率、SpO₂、VO₂ max、体重 | 不共享静息心率、HRV、呼吸率、皮温、路线/分圈；需在 Samsung Health 同意处理健康与健身数据 |
+| Oura Ring | Oura → Oura App → Health Connect / Apple Health → Google Health | 步数、距离、睡眠、训练摘要、心率、HRV、体重 | 不共享静息心率、呼吸率、SpO₂、VO₂ max、皮温、路线/分圈；OHA 也不查询普通全天心率流 |
+| Whoop | Whoop → Whoop App → Health Connect → Google Health；仅 Android | 运动中心率、步数、热量、距离、睡眠、训练、静息心率、呼吸率、SpO₂、体重 | 不共享 HRV、VO₂ max、皮温、运动外心率、路线和分圈 |
+| Withings | Withings → Withings App → Health Connect / Apple Health → Google Health | 当前 Google 设备页未给完整指标矩阵，必须逐项验证 | Google 明确说明 Withings 血压数据尚不支持；请通过微信或 CLI 手工记录 |
+| Zepp / Amazfit | Amazfit → Zepp → Health Connect / Apple Health → Google Health | 步数、距离、能量、睡眠、训练、心率/静息心率、体重、呼吸率、VO₂ max、SpO₂、路线 | 不共享 HRV、皮温、楼层、分圈和心律提醒 |
+
+来源：[Google 第三方设备兼容说明](https://support.google.com/googlehealth/answer/14236613?hl=en) · [Google Health API 支持设备](https://developers.google.com/health/about?hl=en) · [`ghealth` 锁定上游版本](https://github.com/Google-Health-API/google-health-cli/tree/6dad482c528b91d6562eadc829fd3e717df5b75a)
+
+### 图片、语音和模型能力
+
+微信能收到图片，只证明消息通道成功；Hermes 还要把真实像素交给模型，模型或辅助视觉服务也必须能理解图片。三层中任何一层失败，都不能声称“看过照片”。
+
+| Hermes 中选择的 provider / 模型路径 | 直接图片输入 | 微信照片能否用于记录 | 重要边界 |
+|---|---|---|---|
+| OpenAI Codex（ChatGPT OAuth） | 当前官方标为 vision 的 Codex 模型支持 | 通常可以，仍需用微信实测 | 安装 Codex CLI 不是前提；ChatGPT OAuth 不是 OpenAI API key |
+| OpenAI API | 选择支持 image input 的 GPT-5.x、GPT-4.1/4o 等模型时支持 | 可以 | 必须核对实际 model ID；文本/音频专用模型不能自动看图 |
+| Anthropic Claude | 当前 Claude vision 模型支持 | 可以 | 需由 Hermes 走正确的原生图像格式 |
+| Google Gemini | Google 当前文档将 Gemini 模型列为多模态 | 可以 | 仍受具体 endpoint、model ID 和 Hermes 版本影响 |
+| Nous Portal、OpenRouter、Copilot、Bedrock | 取决于所选模型，不取决于聚合器名称 | 视模型而定 | 同一 provider 内既可能有视觉模型，也可能有纯文本模型 |
+| DeepSeek 官方 API | **当前不支持直接图片输入**；用户消息 schema 是文本 | 主模型不能直接看图；可选 Hermes 辅助视觉旁路 | Hermes 可先让另一视觉模型描述图片，再把文字交给 DeepSeek；此时照片会经过第二个模型提供商 |
+| Ollama / vLLM / LM Studio / 自定义 endpoint | 取决于模型和服务是否实现图片协议 | 需逐端点实测 | `Qwen-VL`、`MiMo-VL` 等视觉模型与普通文本/编码模型不能混为一谈 |
+
+截至 2026-07-14，DeepSeek 官方 V4 直连 API 仍是纯文本；兼容别名 `deepseek-chat` 和 `deepseek-reasoner` 计划于 **2026-07-24 15:59 UTC** 停用，新配置应使用 `deepseek-v4-flash` 或 `deepseek-v4-pro`。更换名称不会获得图片输入能力。
+
+官方依据：[OpenAI 图片与视觉](https://developers.openai.com/api/docs/guides/images-vision) · [Claude vision](https://platform.claude.com/docs/en/build-with-claude/vision) · [Gemini 图片理解](https://ai.google.dev/gemini-api/docs/image-understanding) · [DeepSeek Chat API schema](https://api-docs.deepseek.com/api/create-chat-completion/) · [Hermes Vision 路由](https://hermes-agent.nousresearch.com/docs/user-guide/features/vision) · [Hermes providers](https://hermes-agent.nousresearch.com/docs/integrations/providers)
+
+语音是另一条能力链：微信/Weixin 能传递语音文件，并不表示任何上述文本或视觉模型会自动完成可靠转写。只有入站消息已有可信 transcript，或另行配置并测试了 STT，才能把语音写入档案；否则请用户补文字。本机核实的 Hermes v0.18.0 中，无转写的 Weixin 语音会保存为 SILK，而内置转写工具接受的格式清单不含 SILK，因此不能直接承诺自动转写；必须先明确转码/自定义 STT，或改用文字。每次更换 Hermes 版本、provider 或 model 后，用一段普通文字、一张无敏感信息的测试图和一句固定测试语音分别验收。
+
+| 其他能力 | 最低要求 | 没有时的行为 |
 |---|---|---|
 | 微信文字记录 | 文本模型、本地文件和命令权限 | 可正常使用 |
-| 微信语音 | 微信已有转写或单独的 STT | 请用户补文字，不编造转写 |
-| 食物/仪表照片 | 当前模型或视觉工具能真正读取图片 | 请用户描述，不假装看过图片 |
 | 小时可穿戴同步 | Google Health、`ghealth`、电脑后台任务 | 仍可使用纯手工记录模式 |
 | iCloud Excel | macOS 已开启 iCloud Drive | Excel 保存在本机普通路径 |
 
@@ -167,7 +210,18 @@ Weixin/iLink Bot 的可用性取决于当前 Hermes 版本、腾讯账号和地�
 
 微信可以接收图片和语音，不代表模型必然能理解它们。无转写的语音可能只是本地缓存的 SILK 文件；无视觉能力的模型也不能识别图片。
 
-### 3. 安装 Open Health Agent：下面二选一，只运行一次
+### 3. 安装 Open Health Agent：先选宿主，再选一次工作簿位置
+
+**要在微信里交流，必须安装到 Hermes。** 原因不是 Hermes 的模型一定更强，而是本架构中真正接收 Weixin/iLink 消息的是 Hermes gateway。把 Skill 只装进 Codex，不会让 Codex 自动接管微信。
+
+| 你的用法 | Skill 安装位置 | 结论 |
+|---|---|---|
+| 只从微信使用 | Hermes | 必选；使用 `--agent hermes` |
+| 微信使用，同时希望 Codex 也能维护/读取同一档案 | Hermes + Codex | 推荐给同时使用两者的人；一次命令重复传入两个 `--agent` |
+| 只在 Codex App/CLI 本地使用，不需要微信 | Codex | 使用 `--agent codex`；不会获得微信入口 |
+| WorkBuddy / Antigravity 等 | 实际接收消息并能执行本地命令的那个宿主 | 按其当前 Skill 机制安装并逐项实测 |
+
+Hermes 和 Codex 的 Skill 副本都调用同一个本机 `open-health-agent` 命令和同一私有数据目录；不要为两个宿主建立两份会互相分叉的账本。Codex 安装后通常要开启一个新任务才能发现新 Skill；Hermes gateway 在安装后要重启。
 
 先克隆仓库：
 
@@ -176,10 +230,16 @@ git clone https://github.com/w2478328197-arch/open-health-agent.git
 cd open-health-agent
 ```
 
-选项 A：Excel 使用默认本地路径：
+选项 A：Excel 使用默认本地路径。只在微信使用时运行：
 
 ```bash
 ./install.sh --agent hermes --timezone Asia/Shanghai
+```
+
+如果还要让 Codex 使用同一个 Skill，**改为只运行下面这一条**，不要先运行上一条：
+
+```bash
+./install.sh --agent hermes --agent codex --timezone Asia/Shanghai
 ```
 
 选项 B：仅把 Excel 视图放进 iCloud Drive：
@@ -191,7 +251,7 @@ cd open-health-agent
   --workbook "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Open Health Agent/健康档案.xlsx"
 ```
 
-不要先运行 A 再运行 B。安装器会保护已有私有配置，第二次普通安装不会覆盖工作簿路径或时区。选项 B 仅适用于 macOS，并且必须先在系统设置中开启 iCloud Drive。
+选项 B 同样可以在 `--agent hermes` 后增加 `--agent codex`。不要先运行 A 再运行 B。安装器会保护已有私有配置，第二次普通安装不会覆盖工作簿路径或时区。选项 B 仅适用于 macOS，并且必须先在系统设置中开启 iCloud Drive。
 
 安装器默认把命令放在 `~/.local/bin`。当前终端找不到 `open-health-agent` 时运行：
 
@@ -496,13 +556,11 @@ npx --yes skills add w2478328197-arch/open-health-agent --agent '*'
 - [兼容性](docs/compatibility.md)
 - [账本结构](skills/open-health-agent/references/ledger-schema.md)
 - [健康规则](skills/open-health-agent/references/health-rules.md)
-- [隐私说明](PRIVACY.md)
-- [安全策略](SECURITY.md)
+- [隐私说明](PRIVACY.zh-CN.md)
+- [安全策略](SECURITY.zh-CN.md)
 
-真实健康数据、目标、图片、语音、日志、数据库、Excel、OAuth 文件和 API key 都被排除在 Git 之外。提交 Issue 和测试只能使用合成数据。发现安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。
+真实健康数据、目标、图片、语音、日志、数据库、Excel、OAuth 文件和 API key 都被排除在 Git 之外。提交 Issue 和测试只能使用合成数据。发现安全问题请按[安全政策](SECURITY.zh-CN.md)私下报告。
 
 项目采用 [Apache License 2.0](LICENSE)。
 
-## English summary
-
-Open Health Agent is a local-first personal wellness and fitness Skill for Hermes and other Agent Skills hosts. It combines optional Google Health API imports with WeChat text, trustworthy voice transcripts, and vision-assisted food or measurement logging; stores an idempotent SQLite ledger; exports a readable Excel view; persists exact user goals locally; and requires fresh health context before personalized advice. Host capabilities, device metrics, vision, speech, and durable scheduling must be verified rather than assumed. It is not a medical device or emergency service.
+完整英文安装、兼容性和使用说明见 [README_EN.md](README_EN.md)。

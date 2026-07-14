@@ -2,6 +2,16 @@
 
 Use this guide for a new machine, a fresh agent host, or migration from a personal spreadsheet. Keep host installation, model credentials, Google authorization, and the private ledger as separate steps so each boundary is visible to the user.
 
+## Contents
+
+- [1. Prerequisites](#1-prerequisites)
+- [2. Install the project and Skill](#2-install-the-project-and-skill)
+- [3. Initialize private storage](#3-initialize-private-storage)
+- [4. Capture the user's goals and constraints](#4-capture-the-users-goals-and-constraints)
+- [5. Add optional Google Health import](#5-add-optional-google-health-import)
+- [6. Add an optional hourly schedule](#6-add-an-optional-hourly-schedule)
+- [7. Verify before handoff](#7-verify-before-handoff)
+
 ## 1. Prerequisites
 
 - macOS or Linux for the included local scheduler adapters. The core Python ledger can run anywhere Python 3.10+ and `openpyxl` are available. iPhone and Android are data-ingress or synced-workbook viewing devices in this architecture, not hosts for the repository's SQLite service or scheduler.
@@ -16,6 +26,8 @@ Do not require Google, Weixin, a multimodal model, or iCloud for manual text log
 
 Clone the public repository and inspect the installer. For the first initialization, choose exactly one of the two commands below; do not run the default command and then the iCloud command.
 
+Choose the host by message ownership: Weixin/WeChat requires `--agent hermes` because Hermes owns the iLink gateway. Add `--agent codex` in the same run only when the user also wants Codex to invoke the same local ledger. Installing only into Codex does not provide a WeChat channel. Read [host-adapters.md](host-adapters.md) before selecting another host.
+
 ```bash
 git clone https://github.com/w2478328197-arch/open-health-agent.git
 cd open-health-agent
@@ -26,6 +38,12 @@ Default local workbook:
 
 ```bash
 ./install.sh --agent hermes --timezone Asia/Shanghai
+```
+
+Same WeChat installation plus optional Codex access:
+
+```bash
+./install.sh --agent hermes --agent codex --timezone Asia/Shanghai
 ```
 
 Or, on macOS with iCloud Drive already enabled, place only the Excel view in iCloud:
@@ -56,6 +74,7 @@ npx --yes skills add w2478328197-arch/open-health-agent --agent '*'
 ```
 
 That command installs the Skill instructions; run the repository installer as well when the host needs the local ledger runtime, workbook template, or background sync.
+It also requires Node.js/npm; the repository's Python runtime itself does not require Node.js.
 
 ## 3. Initialize private storage
 

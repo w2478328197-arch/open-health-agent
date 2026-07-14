@@ -33,11 +33,13 @@ hermes
 分别测试：
 
 1. 主聊天模型是否能真正读取入站图片；
-2. Hermes 的视觉辅助模型是否配置且可用；
-3. 语音消息是否带微信转写文本；若没有，是否有可用 STT；
-4. 相关提供商的隐私、留存和区域规则是否可接受。
+2. 主模型是纯文本时，Hermes 的 `auxiliary.vision` 是否配置且可用；
+3. 语音消息是否带微信转写文本；若没有，是否有经过真实测试的转码/STT；
+4. 主模型、辅助视觉和 STT 各自的提供商、隐私、留存和区域规则是否可接受。
 
-文本模型看不到图片时，Skill 必须请用户用文字补充，不能从文件名或聊天上下文猜食物/仪表读数。语音同理。
+OpenAI 当前 vision-capable GPT/Codex、Claude vision 和 Gemini 可以直接处理图片；DeepSeek V4 官方直连 API 是纯文本。Hermes 可以先让另一个视觉模型描述图片，再把描述交给 DeepSeek，但这不是 DeepSeek 原生看图，而且照片会经过第二个提供商。聚合器和自建 endpoint 的能力取决于最终模型与协议，不能从 provider 名称推断。完整矩阵见[兼容性说明](compatibility.md)。
+
+主模型不能看图且辅助视觉也不可用时，Skill 必须请用户用文字补充，不能从文件名或聊天上下文猜食物/仪表读数。语音同理。本机 Hermes v0.18.0 的 Weixin 无转写音频会缓存为 SILK，而内置 STT 格式清单不含 SILK；没有明确转码/自定义 STT 时不能承诺自动转写。
 
 ## 3. 安装 Open Health Agent
 
@@ -47,6 +49,14 @@ hermes
 ./install.sh --help
 ./install.sh --agent hermes --timezone Asia/Shanghai
 ```
+
+如果用户还希望从 Codex 调用同一个私有账本，在**同一次**安装中使用：
+
+```bash
+./install.sh --agent hermes --agent codex --timezone Asia/Shanghai
+```
+
+微信场景仍以 Hermes 为必选宿主，因为 Hermes gateway 才接收 Weixin 消息；只安装 Codex 不会获得微信入口。
 
 首次初始化只能选一次工作簿路径；要把 Excel 放进 iCloud，应在这条首次安装命令上直接加 `--workbook '<路径>'`，不要先普通安装再运行第二遍。已经安装后改路径或时区，使用 `open-health-agent init --force --workbook '<路径>' --timezone Asia/Shanghai`；installer 的 `--force` 不会改私有配置。完整选择见[安装文档](../skills/open-health-agent/references/installation.md)。
 

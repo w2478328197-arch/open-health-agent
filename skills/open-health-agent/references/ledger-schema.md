@@ -1,5 +1,15 @@
 # Ledger schema and integrity contract
 
+## Contents
+
+- [Storage roles](#storage-roles)
+- [Copyable manual-entry examples](#copyable-manual-entry-examples)
+- [Managed workbook sheets](#managed-workbook-sheets)
+- [Record identity and deduplication](#record-identity-and-deduplication)
+- [Missing, quality, and confidence](#missing-quality-and-confidence)
+- [Workbook write discipline](#workbook-write-discipline)
+- [Time and aggregation rules](#time-and-aggregation-rules)
+
 ## Storage roles
 
 - **SQLite is the source of truth.** It provides stable identities, idempotent upserts, sync-run state, and an audit trail.

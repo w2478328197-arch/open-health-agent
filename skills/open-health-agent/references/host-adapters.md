@@ -17,6 +17,15 @@ A full installation needs the host to:
 
 If a host lacks command execution, it may still use the Skill as an explanatory/advice policy, but it cannot claim to have recorded, synced, or read the private ledger.
 
+## Install into the host that receives the message
+
+- For Weixin/WeChat in this reference architecture, install the Skill into **Hermes**. Hermes owns the iLink gateway and is therefore the required host for WeChat messages.
+- Install the same Skill into **Codex** only when the user also wants to invoke it from Codex for local maintenance, development, or a separate Codex conversation. A Codex Skill copy does not replace the Hermes gateway or make Codex receive WeChat.
+- When both hosts run as the same trusted OS user, point both at the same local command and private data home. Do not create competing ledgers or workbook writers.
+- For WorkBuddy, Antigravity, or another host, install into the process that actually receives the message and can execute the local ledger command; then verify each capability.
+
+The repository installer accepts repeated host flags, for example `./install.sh --agent hermes --agent codex`. After installation, restart a running Hermes gateway. Codex normally detects Skill changes automatically; if the Skill does not appear, start a new task or restart Codex.
+
 ## Compatibility matrix
 
 | Capability | Hermes | WorkBuddy | Antigravity | Generic Agent Skills host |
@@ -39,6 +48,22 @@ Hermes is the reference implementation for this repository.
 - Connect personal WeChat with `hermes gateway setup` → Weixin. Hermes uses Tencent's iLink Bot API and creates a separate bot identity. Before any health message, replace an open DM policy with pairing/own-user allowlist, disable groups, and verify with non-sensitive content. See [Hermes Weixin docs](https://hermes-agent.nousresearch.com/docs/user-guide/messaging/weixin).
 - Treat Hermes media caches as local sensitive storage. Installed versions may use `~/.hermes/cache/{images,audio,videos,documents}`; verify and clean them explicitly because retention varies and audio/video may persist.
 - Let the OS scheduler run health sync. The chat gateway and the health importer are separate services and must not become two workbook writers.
+
+### Model and media routing
+
+Do not infer input capability from a provider name. Verify the exact model and route.
+
+| Provider/model path | Direct image input | Required handling |
+|---|---|---|
+| OpenAI Codex via ChatGPT OAuth | Supported by current vision-capable Codex models | Test one non-sensitive image through the actual Weixin gateway; Codex OAuth is not an OpenAI API key |
+| OpenAI API | Supported only by an image-input-capable GPT model | Check the current model documentation and exact model ID |
+| Anthropic Claude vision | Supported | Verify Hermes sends the provider's native image content |
+| Google Gemini | Current Gemini models are multimodal | Verify endpoint, model ID, and installed Hermes metadata |
+| Nous Portal, OpenRouter, Copilot, or Bedrock | Selected-model dependent | An aggregator contains both vision and text-only choices |
+| DeepSeek direct API | Current direct chat schema is text-only | Never claim native vision. Hermes may use `auxiliary.vision` to send the image to a second vision model and inject its text description; disclose that second provider |
+| Local/custom endpoint | Model and server dependent | Confirm that both the model and OpenAI-compatible server implement image content; a `*-VL` model is not equivalent to an ordinary text/coding model |
+
+Receiving an image, routing its pixels, and understanding it are separate gates. Voice is separate again: a received audio file is not a transcript. On the locally verified Hermes v0.18.0 path, Weixin audio without an iLink transcript is cached as SILK while the built-in transcription format allowlist does not include SILK. Ask for text unless a tested transcode/custom STT path exists. Re-check this behavior after upgrading Hermes.
 
 The repository scheduler is installed, inspected, and removed with `open-health-agent scheduler install|status|uninstall`. On Linux, inspect the status-reported systemd user `linger` value; without linger, logout may stop the user timer. On macOS, the optional AC-only process uses `open-health-agent keep-awake-on-ac install|status|uninstall` and does not guarantee operation during lid-closed/full sleep.
 

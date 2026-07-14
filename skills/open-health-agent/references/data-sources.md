@@ -1,5 +1,16 @@
 # Data sources and wearable chain
 
+## Contents
+
+- [Canonical wearable path](#canonical-wearable-path)
+- [What supported means](#what-supported-means)
+- [Upstream types, OHA mappings, and device paths](#upstream-types-oha-mappings-and-device-paths)
+- [Freshness and dates](#freshness-and-dates)
+- [Source semantics](#source-semantics)
+- [Manual text, voice, and photo](#manual-text-voice-and-photo)
+- [Measurements outside Google Health](#measurements-outside-google-health)
+- [OAuth and scope hygiene](#oauth-and-scope-hygiene)
+
 ## Canonical wearable path
 
 `ghealth` is a command-line client under the [Google-Health-API GitHub organization](https://github.com/Google-Health-API/google-health-cli). This project uses it to query the cloud [Google Health API](https://developers.google.com/health). It is not a direct API for Health Connect, Apple Health, Garmin Connect, Mi Fitness, or a watch.
@@ -26,6 +37,30 @@ Do not say “all wearables work.” Say: **a device can contribute the metrics 
 Google's [device and app connection guide](https://support.google.com/googlehealth/answer/14236613?hl=en-GB) lists examples such as Apple Watch, Garmin, Samsung Galaxy Watch, Whoop, Oura, and third-party apps. The same guide documents metric-specific gaps. For example, Google Health does not connect directly to Garmin hardware; Garmin must first sync to Garmin Connect, then through Health Connect or Apple Health. Apple Watch metrics also depend on the watch model and Apple Health data.
 
 For Xiaomi and other manufacturers, verify the current Google matrix and the manufacturer's Health Connect/Apple Health export behavior. A brand name alone is not proof that HRV, sleep stages, SpO₂, VO₂ max, workout routes, or active energy will arrive.
+
+## Upstream types, OHA mappings, and device paths
+
+The pinned `ghealth` upstream release documents 40 verified API data types. OHA currently maps only these 14 query families:
+
+`steps`, `distance`, `active-energy-burned`, `active-minutes`, `daily-resting-heart-rate`, `daily-heart-rate-variability`, `daily-oxygen-saturation`, `daily-respiratory-rate`, `daily-vo2-max`, `weight`, `body-fat`, `height`, `sleep --detail`, and `exercise`.
+
+Do not claim that the other upstream types are automatically imported. The current gaps include continuous heart rate, floors, altitude, heart-rate zones, sedentary periods, swimming, basal/total energy, glucose, temperature, sleep temperature, ECG, irregular-rhythm notifications, and Google Health hydration/nutrition logs. Exercise summaries may contain average/max heart rate; that is not the continuous heart-rate stream.
+
+The following table was verified against Google's official device page on 2026-07-14. It describes paths into Google Health, not a permanent hardware certification.
+
+| Source | Path | Representative data Google documents | Explicit gaps or conditions |
+|---|---|---|---|
+| Fitbit / Pixel Watch | Google first-party path | Activity, sleep, exercise, resting heart rate, and supported overnight vitals | Device-, region-, and eligibility-dependent; OHA does not map continuous heart rate, skin temperature, ECG, or rhythm alerts |
+| Apple Watch | Apple Health → Google Health | Activity, sleep, exercise/routes, body data, VO₂ max, heart rate, overnight HRV/SpO₂/respiratory rate/resting heart rate | No exercise minutes, stand hours, ECG/rhythm alerts, or all-day vitals |
+| Garmin | Garmin Connect → Health Connect/Apple Health → Google Health | Activity, sleep, exercise summaries, heart/resting heart rate, weight | No HRV, respiratory rate, SpO₂, VO₂ max, skin temperature, routes, or lap details |
+| Mi Fitness / Xiaomi | Health Connect → Google Health; Android only | Exercise heart rate, activity, sleep, exercise/maps, weight | No HRV, respiratory rate, SpO₂, VO₂ max, skin temperature, or heart rate outside exercise |
+| Samsung Galaxy Watch | Samsung Health → Health Connect → Google Health; Android only | Activity, sleep, exercise, heart rate, SpO₂, VO₂ max, weight | No resting heart rate, HRV, respiratory rate, skin temperature, routes/laps; extra Samsung health-data-processing consent required |
+| Oura | Oura App → Health Connect/Apple Health → Google Health | Activity, sleep, exercise summaries, heart rate, HRV, weight | No resting heart rate, respiratory rate, SpO₂, VO₂ max, skin temperature, routes/laps; OHA does not query ordinary heart rate |
+| Whoop | Whoop App → Health Connect → Google Health; Android only | Activity, sleep, exercise, resting heart rate, respiratory rate, SpO₂, weight | No HRV, VO₂ max, skin temperature, out-of-exercise heart rate, routes/laps |
+| Withings | Withings App → Health Connect/Apple Health → Google Health | Verify each metric | Google explicitly says Withings blood pressure is not yet supported; record it manually |
+| Zepp / Amazfit | Zepp → Health Connect/Apple Health → Google Health | Activity, sleep, exercise, resting heart rate, weight, respiratory rate, VO₂ max, SpO₂, routes | No HRV, skin temperature, floors, lap details, or rhythm alerts |
+
+Always re-check [Google's current device compatibility page](https://support.google.com/googlehealth/answer/14236613?hl=en) and the installed `ghealth schema types` output after an upstream change.
 
 ## Freshness and dates
 
