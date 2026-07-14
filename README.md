@@ -1,69 +1,188 @@
 # Open Health Agent
 
-一个本地优先、可审计、可移植到多种 Agent 宿主的个人运动健康 Skill。它把可穿戴、微信文字/语音/照片和手动测量整理成统一健康档案，并要求 Agent **每次给营养、运动或生活建议前，先读取当天数据、趋势、目标和安全约束**。
+[![CI](https://github.com/w2478328197-arch/open-health-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/w2478328197-arch/open-health-agent/actions/workflows/ci.yml)
 
-> 这是个人 wellness/fitness 记录与辅助决策项目，不是医疗器械、诊断、处方或急救服务。
+把 Hermes、微信、Google Health、可穿戴设备和 Excel 串成一个本地优先的个人运动健康 Agent。
 
-## 它解决什么
+你可以在微信里发一句话、语音转写或餐食照片；Agent 会把用户明确确认或符合专用健康对话约定的事件写入本地档案。可穿戴数据可按小时同步。每次给营养、训练、恢复或生活建议前，Agent 必须先读取最新健康上下文和你的目标，而不是只凭聊天记忆回答。
 
-- 在电脑端维护私有健康档案：SQLite 是幂等写入与审计真源，Excel 是用户持有的可读导出视图。受管健康 sheet 会在每次导出时从 SQLite 重建；纠错走 CLI，直接编辑只放在自建 sheet。
-- 可选通过 `ghealth` 抓取 Google Health API 数据，按小时重叠回看、去重更新，而不是每次追加重复行。
-- 支持微信文字；语音需可用转写/STT；食物或仪表照片需有视觉能力的模型。
-- 只有“实际吃了/喝了”才记饮食；购买、菜单、计划、菜谱不算摄入。
-- 饮食记录包含份量区间、宏量营养素、可验证的微量营养素、来源、覆盖率和不确定性。
-- 用用户确认的瘦体重估算静息能量，结合活动热量和食物热效应（TEF），并防止重复计算。
-- 用户目标按原话写入私有 `AGENTS.md`/目标历史；无目标时以改善健康为临时目标，参考 WHO 年龄/生命周期建议。
-- 目标与健康风险冲突时明确提示，并提供更安全的实现路径。
+> 这是个人 wellness/fitness 记录与辅助决策项目，不是医疗器械、诊断、处方或急救服务。遇到胸痛、严重呼吸困难、晕厥、新发神经系统症状等紧急情况，先联系当地急救服务，不能先等 Agent 同步或记账。
 
-## 首次对话会先说明什么
+## 你最终会得到什么
 
-任何宿主第一次调用这个 Skill 时，都必须先用用户的语言简要说明：
+- 微信中的健康入口：文字、可靠的语音转写、视觉模型可读的食物或仪表照片。
+- 一份电脑上的私有健康档案：SQLite 负责可靠写入和审计，Excel 负责给人查看。
+- 可选的 Google Health 导入：步数、睡眠、训练、活动热量等数据每小时重叠回看并去重更新。
+- 持久目标：用户目标按原话保存在私有 `AGENTS.md` 和目标历史中。
+- 有数据依据的建议：先读取今天截至目前、完整日 7 天基线、28 天趋势、训练、饮食、目标和数据新鲜度，再给建议。
 
-1. 档案存在哪里、SQLite 与 Excel 各自做什么；
-2. 可穿戴数据经过哪些中间环节，为什么“支持设备”不等于“每个指标都有”；
-3. 文字、语音、照片分别需要什么能力，以及估算的不确定性；
-4. 设备厂商、Apple Health/Health Connect 及其平台账号/应用层、微信/腾讯、Google、模型服务商、STT/视觉服务和 iCloud 可能处理哪些数据；
-5. 建议前会读本地最新上下文；
-6. 项目的非医疗边界。
+日常使用不需要手写 JSON。下面这些都是给微信里的 Agent 说的话：
 
-如果用户已经明确要求安装、同步或录入，说明后继续；否则先征得确认。
+| 你发给 Agent | Agent 应该做什么 |
+|---|---|
+| `我的目标是提高力量，但我有高血压` | 先保存目标原话和安全约束，再读取健康上下文并给更安全的力量提升路径 |
+| `早上血压 128/82` | 记录收缩压、舒张压、时间、来源和原话，返回记录结果 |
+| `今天抗阻训练 45 分钟，RPE 8` | 写入训练记录，重建当天上下文，再调整饮食和恢复建议 |
+| `午饭吃了这个` + 餐食照片 | 视觉可用时估算食物、份量区间、宏量营养和可验证的微量营养；保留置信度和不确定性 |
+| `今天怎么吃、还要不要运动？` | 先运行健康上下文，再按今天是抗阻、有氧、休息或恢复不足日给建议 |
 
-## 数据链路
+## 数据是怎么走的
+
+第三方设备的**典型**链路如下；Fitbit、Pixel 和部分合作设备可能通过 Google 自有或直接合作链路进入 Google Health，不一定经过每一个中间层。
 
 ```mermaid
 flowchart LR
     W["可穿戴设备"] --> M["厂商 App"]
     M --> H["Health Connect / Apple Health"]
-    H --> G["Google Health App / 账号"]
+    H --> G["Google Health App / 同一账号"]
+    D["Google / 合作设备的直接链路"] --> G
     G --> API["Google Health API"]
-    API --> CLI["ghealth CLI"]
-    CLI --> DB["本地 SQLite 真源"]
-    WX["微信文字 / 语音 / 照片"] --> A["Agent 解析与确认"]
+    API --> GH["ghealth CLI"]
+    GH --> DB["本地 SQLite 真源"]
+    WX["微信文字 / 语音转写 / 照片"] --> A["Hermes + Open Health Agent"]
     A --> DB
     DB --> X["Excel 可读视图"]
-    DB --> C["当日 + 7 日 + 28 日上下文"]
+    DB --> C["今天 + 7 天 + 28 天上下文"]
     R["私有 AGENTS.md 目标与约束"] --> C
     C --> P["个性化建议"]
 ```
 
-`ghealth` 指 [Google-Health-API organization 的 google-health-cli 项目](https://github.com/Google-Health-API/google-health-cli)。它查询云端 [Google Health API](https://developers.google.com/health)，**不是直接读取 Health Connect**。设备必须先通过厂商 App 与 Health Connect/Apple Health、Google Health 完成数据同步；Google 官方的[设备连接说明](https://support.google.com/googlehealth/answer/14236613?hl=en-GB)也列出了按设备和指标的差异。
+这里使用的 [`ghealth`](https://github.com/Google-Health-API/google-health-cli) 是一个独立开源 CLI，用来查询云端 [Google Health API](https://developers.google.com/health)；它不是直接读取 Health Connect、Apple Health、Garmin Connect 或手表。本项目与 Google、Hermes、腾讯和任何设备厂商都没有隶属或背书关系。
 
-Google 授权有两条不可混用的路径：Desktop OAuth client 配合 `ghealth` 的本机交互式 loopback 登录；或按 Google 当前指南创建 Web Server client、登记 `https://www.google.com`，再用 `ghealth auth login --non-interactive` 和输出的 `--complete` 命令复制 code。OAuth consent screen 仍为 Testing 时，refresh token 可能约 7 天后过期。完整命令见[安装与上手](skills/open-health-agent/references/installation.md)。
+## 真实支持范围
 
-初始化后还要让 ghealth 当前活动 profile 使用同一个显式 IANA 时区，例如 `ghealth config set timezone Asia/Shanghai`。`doctor` 只读验证，真实同步会阻止时区不一致；定时任务会固定安装时的 profile 并强制 JSON 输出，不会替用户改 profile。
+“支持某品牌”不等于“该品牌的全部指标都能导入”。一个指标只有同时满足以下条件才可用：
 
-## 快速开始
+1. 设备把该指标同步到厂商 App；
+2. 厂商链路把它写入 Google Health 接受的数据源；
+3. 同一个 Google Health 账号里能看到该指标；
+4. 用户授权了对应只读 scope；
+5. Google Health API 实际返回它；
+6. Open Health Agent 当前适配器已经映射该类型。
 
-安装器不会替你创建模型、微信或 Google 凭据，也不会隐式安装 Hermes。若以 Hermes 为宿主，先按其[官方安装文档](https://hermes-agent.nousresearch.com/docs/getting-started/installation)完成一次普通对话，再安装本项目：
+当前自动导入映射包括 14 类查询：步数、距离、活动热量、活动分钟、静息心率、HRV、血氧、呼吸率、VO₂ max、体重、体脂、身高、睡眠和训练。Google Health 或 `ghealth` 支持但本适配器尚未映射的数据，不会自动进入档案。
+
+Google 的[设备连接说明](https://support.google.com/googlehealth/answer/14236613?hl=en-GB)会按品牌列出指标差异。例如其当前表格显示，小米链路可共享步数、距离、能量、睡眠、训练和体重等，但不共享 HRV、呼吸率、SpO₂ 或 VO₂ max。缺数据时先检查手机端，不能把空值写成 0。
+
+| 能力 | 最低要求 | 没有时的行为 |
+|---|---|---|
+| 微信文字记录 | 文本模型、本地文件和命令权限 | 可正常使用 |
+| 微信语音 | 微信已有转写或单独的 STT | 请用户补文字，不编造转写 |
+| 食物/仪表照片 | 当前模型或视觉工具能真正读取图片 | 请用户描述，不假装看过图片 |
+| 小时可穿戴同步 | Google Health、`ghealth`、电脑后台任务 | 仍可使用纯手工记录模式 |
+| iCloud Excel | macOS 已开启 iCloud Drive | Excel 保存在本机普通路径 |
+
+开始前先确认：
+
+```bash
+git --version
+python3 --version
+```
+
+本地账本需要 Python 3.10+。只有启用可穿戴导入时才需要 Go 1.23+、Google 账号、Google Health App 和 Google Cloud OAuth client。纯文字手工记录不需要 Google、微信、视觉模型或 iCloud。
+
+缺少依赖时：macOS 可先运行 `xcode-select --install` 安装 Git/Command Line Tools，并从 [Python 官方下载页](https://www.python.org/downloads/)安装 Python 3.10+；完整可穿戴模式再从 [Go 官方下载页](https://go.dev/dl/)安装 Go 1.23+。使用 Homebrew 的用户也可以通过 Homebrew 安装 Git、Python 和 Go。Linux 请使用发行版包管理器，并确认实际版本满足要求。系统不必安装 Microsoft Excel 才能生成 `.xlsx`，但查看工作簿需要 Excel、Numbers、LibreOffice 或其他兼容应用。
+
+本文使用 `Asia/Shanghai` 作为示例。中国标准时间以外的用户必须把 OHA 初始化、`ghealth config` 和其他示例里的时区全部替换成自己的 [IANA 时区名称](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)，例如 `Europe/Berlin` 或 `America/New_York`；不要使用含义不唯一的 `CST` 等缩写。
+
+## 从零安装：Hermes + 微信 + Google Health
+
+以下是参考主线：macOS 或 Linux 电脑运行 Hermes、账本和后台任务，iPhone/Android 负责设备同步、Google Health 和微信。Windows 原生环境的核心账本原则上可运行，但本仓库尚未承诺完整的 Windows 后台调度体验。
+
+### 1. 安装并验证 Hermes
+
+macOS 推荐使用 [Hermes Desktop 安装器](https://hermes-agent.nousresearch.com/docs/getting-started/installation)；Hermes 官方说明该安装器同时安装 Desktop 和 CLI。安装完成后关闭并重新打开终端，验证：
+
+```bash
+command -v hermes
+hermes version
+hermes doctor
+```
+
+macOS、Linux 或 WSL2 也可使用官方 CLI 安装命令：
+
+```bash
+curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+command -v hermes
+hermes doctor
+```
+
+不希望直接执行远程脚本时，使用 Desktop 安装器，或先下载并审阅 Hermes 官方脚本再运行。
+
+配置模型或登录方式：
+
+```bash
+hermes model
+hermes
+```
+
+- 要使用 ChatGPT OAuth，在 `hermes model` 中选择 **OpenAI Codex**。这不是 OpenAI API key，也不等于 API 计费账户。
+- 要使用 OpenAI API、DeepSeek、Gemini 或其他 provider，也在 `hermes model` 中分别配置。能力和数据处理条款取决于实际 provider/model。
+- 照片录入前必须发一张无敏感内容的测试图，确认当前模型真的能看图。若所选 DeepSeek endpoint/model 不接收图片，就只能使用文字，或另外配置视觉模型。
+- 运行 `hermes tools`，确认微信所用配置可以使用 Skills、Terminal/Files；需要照片时再确认 Vision。若选择了 Blank Slate 之类的最小工具配置，Hermes 可能能聊天却不能写本地档案。
+
+官方参考：[Hermes 安装](https://hermes-agent.nousresearch.com/docs/getting-started/installation) · [Provider 配置](https://hermes-agent.nousresearch.com/docs/integrations/providers) · [CLI 命令](https://hermes-agent.nousresearch.com/docs/reference/cli-commands)
+
+### 2. 安全接入微信
+
+Hermes 的个人微信适配器使用腾讯 iLink Bot API。扫码后得到的是独立的 `...@im.bot` 身份，不是把普通个人微信变成可脚本控制账号；直接消息通常比普通群可靠。
+
+```bash
+hermes gateway setup
+```
+
+在向导中选择 Weixin，扫码并记下成功信息里的 `account_id`。先编辑 `~/.hermes/.env`，至少设置：
+
+```dotenv
+WEIXIN_ACCOUNT_ID=扫码后得到的-account-id
+WEIXIN_DM_POLICY=pairing
+WEIXIN_GROUP_POLICY=disabled
+```
+
+然后在前台启动，并从自己的微信只发送一条不敏感的测试消息：
+
+```bash
+hermes gateway run
+```
+
+从 gateway 日志或入站事件中取得你自己的 Weixin user ID 后，停止前台服务，把策略收紧为：
+
+```dotenv
+WEIXIN_DM_POLICY=allowlist
+WEIXIN_ALLOWED_USERS=你自己的-Weixin-user-ID
+WEIXIN_GROUP_POLICY=disabled
+```
+
+最后安装并检查后台 gateway：
+
+```bash
+hermes gateway install
+hermes gateway start
+hermes gateway status
+```
+
+当前 Hermes 的 Weixin 私信默认策略是 `open`；健康场景不要保留默认值。`WEIXIN_ALLOWED_USERS` 是入站过滤器，不是邀请系统。完整说明见 [Hermes Weixin 文档](https://hermes-agent.nousresearch.com/docs/user-guide/messaging/weixin)。若向导报告缺少 `aiohttp` 或 `cryptography`，按该官方页面安装 messaging 依赖后再继续。
+
+Weixin/iLink Bot 的可用性取决于当前 Hermes 版本、腾讯账号和地区。如果向导没有 Weixin、扫码失败或 iLink 不向该账号开放，不要绕过访问控制；先使用 Hermes CLI 或纯手工账本模式，并按当前官方文档排查。
+
+微信可以接收图片和语音，不代表模型必然能理解它们。无转写的语音可能只是本地缓存的 SILK 文件；无视觉能力的模型也不能识别图片。
+
+### 3. 安装 Open Health Agent：下面二选一，只运行一次
+
+先克隆仓库：
 
 ```bash
 git clone https://github.com/w2478328197-arch/open-health-agent.git
 cd open-health-agent
-./install.sh --help
-./install.sh
 ```
 
-首次安装 Hermes，并把**仅 Excel 视图**放进 iCloud Drive 的示例：
+选项 A：Excel 使用默认本地路径：
+
+```bash
+./install.sh --agent hermes --timezone Asia/Shanghai
+```
+
+选项 B：仅把 Excel 视图放进 iCloud Drive：
 
 ```bash
 ./install.sh \
@@ -72,103 +191,318 @@ cd open-health-agent
   --workbook "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Open Health Agent/健康档案.xlsx"
 ```
 
-SQLite、目标和凭据仍保留在本地私有目录；放入 iCloud 的工作簿会受 Apple 的同步与留存条款约束。
+不要先运行 A 再运行 B。安装器会保护已有私有配置，第二次普通安装不会覆盖工作簿路径或时区。选项 B 仅适用于 macOS，并且必须先在系统设置中开启 iCloud Drive。
 
-iPhone 或 Android 手机在这条架构里是设备数据、Google Health 与微信消息的入口，也可查看已经同步的工作簿；本仓库的 SQLite 真源和小时 scheduler 仍运行在受支持的 macOS/Linux 电脑上。
+安装器默认把命令放在 `~/.local/bin`。当前终端找不到 `open-health-agent` 时运行：
 
-安装后先检查，再进行真实授权或定时同步。安装器会建立稳定的 `open-health-agent` 命令，并在最后打印带私有目录的 `Command:` 前缀；在其后追加 `doctor`、`sync`、`context` 等子命令。默认私有目录可直接运行：
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+这只影响当前终端。需要长期使用时，把同一行加入 `~/.zshrc` 或 `~/.bashrc`；也可以始终使用安装器最后打印的完整 `Command:` 前缀。后台 Hermes gateway 是否能执行该命令，必须以后面的微信实测为准，不能用当前终端成功来代替。
+
+如果 Hermes gateway 已经在后台运行，安装新 Skill 后重启一次：
+
+```bash
+hermes gateway restart
+```
+
+如果已经安装过，现在才想改时区、改成 iCloud 或选择一份已有 `.xlsx`，使用：
+
+```bash
+open-health-agent init --force \
+  --timezone Asia/Shanghai \
+  --workbook "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Open Health Agent/健康档案.xlsx"
+```
+
+`init --force` 会备份并更新明确给出的配置字段，不会删除现有 SQLite、目标或私有档案。若新路径指向空文件，旧工作簿里的自建 sheet 不会自动搬过去；若指向一份已有 `.xlsx`，普通自建 sheet 会尽量保留。已有复杂 Excel 请先另做备份：受管健康 sheet 会从 SQLite 重建，宏、嵌入对象、切片器或厂商扩展不保证完整保真。
+
+现在验证本地账本和 Skill：
 
 ```bash
 open-health-agent doctor
+hermes chat -q "/open-health-agent 请先解释这个 Skill，然后检查我的健康档案是否可用"
 ```
 
-`doctor` 会校验 SQLite、profile JSON、私有 `AGENTS.md` 目标投影和 Excel 受管表头。未安装 `ghealth` 不会让纯手工记录模式整体报错；其检查会明确标成可选。若三份目标投影因中途断电等原因不一致，运行 `open-health-agent goal repair`，从本地 SQLite 真源重建 profile 与 `AGENTS.md` 后再复查。
+合格的第一条回复会先解释本地存储、数据链路、照片/语音条件、第三方处理范围、不确定性和非医疗边界，然后继续执行你已经明确要求的检查。若第一条消息是紧急情况，则先给紧急处置方向，不能先跑说明、同步或记账。
 
-微信文字、语音转写和图片识别后的结果都通过同一个本地写入器进入 SQLite，再安全导出 Excel。血压必须同时写收缩压/舒张压，食物必须有 JSON `consumed: true` 才会计入已摄入，照片估算需保留份量范围和置信度。可直接复制的血压、食物宏量/微量、训练、目标和瘦体重示例见[手工录入规范](skills/open-health-agent/references/ledger-schema.md#copyable-manual-entry-examples)。
-
-每个新会话里，Agent 完成首次说明后可运行 `open-health-agent onboarding mark-explained` 留下本地安装审计；用户对连接外部账号或安装后台任务明确同意后，再运行 `open-health-agent onboarding grant-consent`。这两个时间戳不能替代“每个会话先说明”，也不能当作当前用户已经同意新的数据范围。
-
-若 `~/.local/bin` 不在 `PATH`，使用安装器打印的完整命令。指定 `--bin-dir` 或 `--home` 时也以实际打印结果为准；不要随意换成缺少依赖的系统 Python。
-
-自定义 `--home` 不会被写死到全局 wrapper。要让 Hermes 或其他宿主在重启后的新会话继续使用同一份私有档案，请在该宿主的持久环境里设置 `OPEN_HEALTH_AGENT_HOME`，或始终使用安装器打印的完整 `open-health-agent --home /你的私有目录 ...` 前缀。不要把这个私有路径写进公开 Skill 或仓库。
-
-也可以把标准 Skill 安装到支持 Agent Skills 的宿主：
+确认这次说明确实已经完成后，检查并记录本地审计时间戳：
 
 ```bash
-npx --yes skills add w2478328197-arch/open-health-agent --agent '*'
+open-health-agent onboarding status
+open-health-agent onboarding mark-explained
 ```
 
-这个方式只保证安装 Skill 说明；本地账本运行时、Excel 模板和定时任务仍需运行仓库安装器。完整步骤见[安装与上手](skills/open-health-agent/references/installation.md)。
+这个时间戳只用于本机安装审计，不能让 Agent 在未来新会话里跳过首次说明。
 
-## Hermes + 微信
+### 4. 在手机端连接 Google Health
 
-Hermes 是本项目的参考宿主：
+纯手工模式可以跳过本节和后面的 `ghealth`、scheduler。
+
+1. 在 iPhone 或 Android 安装并登录 Google Health App；它是手机 App，不是手表 App。
+2. 让设备先同步到厂商 App，例如 Mi Fitness、Garmin Connect、Samsung Health、Oura 或其他厂商 App。
+3. 按设备支持情况，通过 Android Health Connect、iPhone Apple Health，或 Google 支持的直接合作路径连接到同一个 Google Health 账号。
+4. 打开厂商 App 完成一次同步，再打开 Google Health，确认你真正需要的每个指标已经出现。
+5. 如果 HRV、睡眠或训练缺失，先在这一层查权限、地区、系统版本和品牌指标支持；小时任务无法抓取从未进入 Google Health 的数据。
+
+### 5. 安装并授权 ghealth
+
+本仓库的构建脚本需要 Git 和 Go 1.23+，会从锁定的上游源码版本构建 `ghealth`：
 
 ```bash
-hermes doctor
-hermes model
-hermes gateway setup
-hermes gateway install
-hermes gateway start
-hermes gateway status
+go version
+./scripts/install_ghealth.sh --dry-run
+./scripts/install_ghealth.sh
+export PATH="$HOME/.local/bin:$PATH"
+ghealth setup --instructions
 ```
 
-- 在 `hermes model` 里选择 **OpenAI Codex**，才是使用 ChatGPT OAuth 登录的路径；直接 OpenAI API key 是另一种 provider/计费路径。参见 [Hermes Provider 文档](https://hermes-agent.nousresearch.com/docs/integrations/providers)。
-- 微信接入使用腾讯 **iLink Bot API**，登录后是独立的 `@im.bot` 身份，不是把普通个人微信变成可脚本控制账号；普通群消息常常不可用。当前默认入站 DM 策略是 `open`；发送任何健康数据前，先改为 pairing/仅本人 allowlist、禁用群聊并用非敏感消息验证。仍为 `open` 时不要发送健康信息，并按安装版本复核。参见 [Hermes Weixin 文档](https://hermes-agent.nousresearch.com/docs/user-guide/messaging/weixin)。
-- 微信能接收图片和语音，不代表当前模型自动具备看图和转写能力。无视觉/STT 时必须请用户补充文字，不能猜。
-- Hermes 当前版本可能把媒体缓存在 `~/.hermes/cache/images`、`audio`、`videos`、`documents`。清理策略随版本和媒体类型变化，尤其不能假定音频/视频会自动删除；限制本机目录权限，按当前版本核查并定期清理不再需要的缓存。
+按照 `ghealth` 自己输出的步骤，在 Google Cloud 中启用 Google Health API，并创建 OAuth client ID。这里必须选择 **Desktop application**，下载 client secret JSON 后运行：
 
-完整配置见 [docs/hermes.md](docs/hermes.md)。
+```bash
+ghealth setup --scopes-preset readonly
+ghealth auth status --validate
+ghealth config set timezone Asia/Shanghai
+```
 
-## 热量模型
+`ghealth setup` 会使用本机 loopback + PKCE 完成浏览器授权。Google 的通用 API 设置页还介绍了 **Web Server** client 和 `https://www.google.com` redirect URI；那是直接编写 API 客户端的流程，不能拿来替代这个 CLI 所需的 Desktop client。
 
-只有用户确认瘦体重时，才使用 Cunningham 1991 FFM 公式：
+若 OAuth consent screen 处于 Testing，要把实际同步 Google Health 的同一账号加入 test users。账号、地区或项目若无法启用 Google Health API，完整可穿戴模式就不能继续；这时仍可使用微信/CLI 手工记录模式。
+
+无图形浏览器的电脑仍然使用同一个 Desktop client：
+
+```bash
+ghealth auth login --non-interactive --scopes-preset readonly
+# 在自己的浏览器打开 auth_url，从回跳地址栏只复制 code 查询参数：
+ghealth auth login --complete '<code>'
+ghealth auth status --validate
+```
+
+`ghealth` 会把 client 和明文 token 保存在 `~/.config/ghealth/`，上游会将文件权限设为仅当前用户可读写。完成并验证后可删除 Downloads 中多余的 client JSON 副本，但不要删除 `ghealth` 管理的配置目录。不要把 client secret、授权 URL、code、token 或完整配置输出发到聊天、Issue 或 Git。Google consent screen 若仍处于 Testing，refresh token 可能较快过期；这和“账号里没有健康数据”是两种不同问题。失效时重新运行 `ghealth auth login --scopes-preset readonly`，再执行 `auth status --validate`、手动 `sync` 和 scheduler 检查。
+
+先做一条最近两天的步数小查询；`--to` 在当前锁定版本中包含指定日期：
+
+```bash
+ghealth data steps daily-rollup --from yesterday --to today
+```
+
+空结果可能表示这两天确实无数据，也可能是设备、账号、scope 或同步链路未打通。步数通过只证明步数；睡眠、训练、HRV 等每个目标指标都要在 Google Health 中可见，并通过对应 `ghealth` 查询或后续 OHA `sync`/`context` 逐项验收。
+
+### 6. 第一次同步并检查 Excel
+
+OHA 和 `ghealth` 的时区必须使用完全相同的 IANA 名称。然后依次运行：
+
+```bash
+open-health-agent doctor
+open-health-agent sync
+open-health-agent context
+```
+
+检查四件事：
+
+- `doctor` 的本地账本检查通过；未启用 scheduler 时，部分 ghealth 检查仍会标为 optional，所以整体 `ok` 不能单独证明可穿戴链路已打通；
+- `ghealth auth status --validate` 和当天步数小查询真实通过；
+- 检查 `sync` JSON 内的 `status`、`errors` 和计数。逐指标查询部分失败时命令仍可能正常退出，只有 `status=success` 才是完整成功；`partial`、`failed`、`empty` 必须按原因处理，不能把缺失写成 0；
+- Excel 出现 `健康日报`、`训练记录`、`健康测量`、`饮食记录`、`每日营养汇总`、`目标历史` 和 `同步日志` 等受管 sheet。
+
+`open-health-agent context` 才是 Agent 每次建议前读取健康表格的标准接口。它读取与 Excel 同源的 SQLite 真源，不是让模型每次直接猜测或自由编辑 `.xlsx`。
+
+### 7. 启用每小时同步和插电待机
+
+只有手动 `sync` 成功、用户明确同意后台运行后，才安装小时任务：
+
+```bash
+open-health-agent onboarding grant-consent
+open-health-agent scheduler install --interval-seconds 3600
+open-health-agent scheduler status
+```
+
+安装时 scheduler 会解析并保存当前 `ghealth` 的绝对路径和活动 profile，不依赖交互式 shell 的临时 `PATH`。刚安装后的 `status` 只证明任务定义和服务状态，不证明它已经自动同步过。保持电脑唤醒，等过下一个约 3600 秒触发点后再次运行 `scheduler status` 和 `open-health-agent context`，并检查 Excel 的 `同步日志` 是否出现新的成功时间戳。
+
+Hermes gateway 和健康 scheduler 是两个不同的后台服务：
+
+- Hermes gateway 接收微信并让 Agent 调用 Skill；
+- Open Health Agent scheduler 每小时读取 Google Health、写 SQLite、再安全导出 Excel。
+
+两者都必须以同一受信任的系统用户运行。不要再并行保留旧 cron、旧导入脚本或第二个 Excel 写入器。
+
+这是约每 3600 秒运行一次，不保证在钟表整点触发。断网、睡眠或上游延迟会产生失败、部分成功或延迟；后续任务会用重叠回看窗口补抓晚到数据。macOS 用户级 launchd 任务通常要在用户登录后运行；重启后登录并检查一次 `scheduler status`。
+
+macOS 完全睡眠时不会持续运行小时任务。插电使用可在“系统设置 → 电池 → 选项”开启“显示器关闭时防止在电源适配器供电时自动进入睡眠”，并保持 MacBook 打开。也可以使用本项目可撤销的 AC-only 适配：
+
+```bash
+open-health-agent keep-awake-on-ac install
+open-health-agent keep-awake-on-ac status
+```
+
+它只在接通电源时防止空闲系统睡眠，不能保证合盖后运行。移除命令是：
+
+```bash
+open-health-agent keep-awake-on-ac uninstall
+open-health-agent scheduler uninstall
+```
+
+Linux 使用 systemd user timer；退出登录后是否继续运行取决于 user linger，请以 `scheduler status` 的结果为准。
+
+## 第一次在微信中验收
+
+按下面顺序做一遍，才能算完整可用：
+
+1. 发 `/open-health-agent 我想开始使用健康档案`。Agent 应先讲解 Skill，再继续。
+2. 发一个新目标，例如“我的目标是提高力量，但我有高血压”。Agent 应先保存原话和安全约束，再给计划。
+3. 发“早上血压 128/82”。Agent 应明确回复是否写入、记录 ID 和保存的数值。
+4. 发“今天抗阻训练 45 分钟，RPE 8”。Agent 应写入训练，并根据训练日调整后续建议。
+5. 发“午饭吃了这个”并附一张无敏感内容的餐食测试图。Agent 应先简短回显识别到的摄入项目，再记录份量区间、估算来源和置信度。
+6. 发一条语音。只有存在可信转写或 STT 时才应记录；否则 Agent 应请你补文字。
+7. 问“我今天怎么吃、还需要运动吗？”回复应注明数据截止时间、今天是否完整、同步是否新鲜，并体现当天训练和你的目标。
+8. 打开 Excel，确认上述记录存在；再运行一次 `open-health-agent context`，确认机器上下文也包含它们。
+
+如果微信里的 Hermes 报找不到 `open-health-agent`，让它改用安装器打印的完整 `Command:` 前缀（默认可执行文件是 `~/.local/bin/open-health-agent`），然后重启 gateway 再测试。只有微信端实际完成一次写入和 context 读取，才说明后台 Hermes 的命令环境正确。
+
+在专用健康/饮食对话里，本项目采用参考 Hermes 工作流中的简化约定：**单独发送一张近距离餐食照片，且没有购物、菜单、未开封包装、计划或背景物线索时，默认表示“把这次实际摄入记下来”**，无需再问“要不要记录”，也不要求用户称重。Agent 仍须先读图、回显识别到的摄入项目、估算中心值和范围；食物身份真正不清楚时只问一个短问题。购物车、菜单、菜谱、价格标签、未开封食物和背景物不能算作已吃。
+
+如果不想采用这条约定，每次配图写“我吃了这个”即可；也可以在私有 `AGENTS.md` 里明确改成“每张照片先确认”。
+
+## 这个 Skill 强制 Agent 遵守什么
+
+### 每个新会话先讲解
+
+除紧急情况外，任何支持 Agent Skills 的宿主第一次使用本 Skill 时，都要先用用户的语言简要说明：
+
+1. SQLite、Excel 和私有目标文件分别保存什么；
+2. 可穿戴数据经过哪些第三方和中间层；
+3. 文字、语音、图片分别需要什么能力；
+4. 微信/腾讯、设备厂商、Apple/Android 健康层、Google、模型/STT/视觉提供商和所选云盘可能处理哪些数据；
+5. 照片营养和可穿戴测量有什么不确定性；
+6. 每次建议前会读取最新本地健康上下文；
+7. 这不是医疗或急救服务。
+
+用户已经明确要求安装、同步或录入时，说明后直接继续，不要无故停下来重复征求同一件事。紧急情况永远先给紧急处置方向。
+
+### 固定的写入与建议顺序
+
+```text
+用户新目标 → 保存原话和安全约束
+用户新数据 / ghealth 新数据 → 写入 SQLite → 导出 Excel
+需要给建议 → open-health-agent context
+               → 检查截止时间、新鲜度、缺失、今天是否完整
+               → 按目标与安全约束给建议
+```
+
+- 新数据写入后必须重建 context，不能继续使用旧上下文。
+- context 读取失败、数据过期或关键字段缺失时，只能给保守、带条件的通用建议，不能声称已经个性化。
+- 今天的数据必须标“截至目前”；完整日 7 天基线和 28 天趋势用于比较。
+- 抗阻日、有氧日、休息日、恢复不足日和数据不完整日的饮食、活动、补水与恢复建议必须不同。
+- 更正同一事件时更新原记录，不能追加一个互相矛盾的副本。
+
+### 目标是最高的项目级用户规范
+
+用户说出、修改、暂停或撤销健康/运动目标时，Agent 先按原话写入私有 `AGENTS.md`、目标历史和 profile，再制定计划。它是本项目最高的持久化用户规范，但仍低于系统规则、紧急安全和医疗边界。
+
+目标与健康风险冲突时，不能悄悄忽略任何一边。例如“高血压但要提高力量”应保留力量目标，同时避免默认推荐极限重量、力竭、屏气用力或未经评估的高强度训练，并给出更安全的进阶路径。没有明确目标时，以提升健康为临时目标，使用适合年龄和生命阶段的 [WHO 身体活动建议](https://www.who.int/news-room/fact-sheets/detail/physical-activity)作为冷启动基线。
+
+## 热量和营养规则
+
+只有用户确认了瘦体重，才使用 Cunningham 1991 FFM 公式估算静息能量：
 
 ```text
 估算 REE = 370 + 21.6 × 瘦体重(kg)
 ```
 
-当活动字段明确是 `active_only`：
+当设备字段明确是 `active_only` 活动热量时：
 
 ```text
 计划摄入 = (估算 REE + 完整日平均活动热量 + 目标调整) / (1 - TEF 比例)
 ```
 
-蛋白质、碳水、脂肪的 TEF 分别用约 20–30%、5–10%、0–3% 的区间估算。若设备给的是已经包含静息消耗的总能量，或使用 PAL，不再叠加 REE/运动/TEF。不会把手表或单次训练热量 1:1 “吃回来”。计算依据与边界见[健康规则](skills/open-health-agent/references/health-rules.md)。
+- 蛋白质、碳水、脂肪的 TEF 分别用约 20–30%、5–10%、0–3% 的区间估算。
+- 若设备给的是已经含静息消耗的总能量，或使用 PAL，不能再叠加 REE、训练热量或 TEF。
+- 不把手表或单次训练热量 1:1“吃回来”；使用范围并说明误差。
+- 照片只能估算可见食物和份量。隐藏用油、配方、重量、钠和全部微量营养通常无法完整确认。
+- 本地 CLI 负责验证和保存 Agent/可靠来源给出的营养字段，不自带一套权威照片营养数据库。没有可靠来源的微量营养应留空，并报告覆盖率，不能编造为 0。
 
-## 目标与规则优先级
+计算和安全依据见[健康规则](skills/open-health-agent/references/health-rules.md)。
 
-私有数据目录中的 `AGENTS.md` 是这个项目的最高持久化用户规范：保存目标原话、优先级和安全约束。它仍然低于系统/开发者指令、紧急安全与法律边界。用户在当前对话确认的新目标，应先写入本地目标历史，再用于计划。
+## Excel、SQLite 和自建指标
 
-建议顺序是：紧急安全 → 已确认目标 → 当天截至目前 → 完整日 7 天基线 → 28 天趋势 → WHO 冷启动基线 → 偏好与便利。
+- SQLite 是唯一写入和审计真源；Excel 是从同一份数据生成的可读视图。
+- Agent 的标准“读健康表”动作是 `open-health-agent context`，不是直接扫描任意 Excel 单元格。
+- 血压计、血糖仪、握力、腰围等未接入 Google Health 的指标，可以通过微信文字、可信语音转写、仪表照片或 CLI 进入 `健康测量`。
+- 要让自建指标影响建议，必须通过 Agent/CLI 作为结构化记录写入。用户自己新增的普通 Excel sheet 会尽量保留，但不会自动进入 context 或建议模型。
+- 受管健康 sheet 不能作为第二个写入真源。纠错应让 Agent 更新原记录，再重新导出。
+- 如果使用 iCloud，只建议同步 Excel 视图；SQLite、`AGENTS.md`、OAuth token、图片和日志留在本机私有目录。
+- 默认私有目录是 `~/.open-health-agent`。安装器在支持的系统上把目录设为仅当前用户访问、文件设为仅当前用户读写，但 SQLite 和配置并不自带静态加密；建议启用 FileVault、LUKS 或等价的整盘加密，并锁好系统账户。
+- 第一次同步、迁移或修复时关闭 Excel/Numbers，避免它和 iCloud 同时形成另一个写入者。普通查看可以继续，但不要在受管健康 sheet 上直接改数值；iCloud 冲突副本也不能当作 SQLite 的替代真源。
 
-## 已知边界
+详细字段和可复制 CLI 例子见[账本规范](skills/open-health-agent/references/ledger-schema.md)。
 
-- 设备兼容不等于 HRV、睡眠阶段、血氧、VO₂ max 等全部可用。
-- 每小时查询不等于每小时出现新数据；手机、厂商 App 和云端都有延迟。
-- 食物照片无法可靠识别隐藏用油、完整配方、精确重量和全部微量营养素。
-- 可穿戴能量、睡眠阶段和 HRV 都有测量误差；本项目优先趋势，不用单点做诊断。
-- `实际睡眠时长_h` 表示 asleep，排除清醒分钟；不能把在床总时长直接当作实际睡眠。
-- WorkBuddy、Antigravity 等宿主可以复用 Skill 规范，但文件、命令、视觉、语音和持久定时能力必须逐项验证，不能仅凭宿主名称承诺可用。
-- “保留自建 sheet”保证的是常规单元格、公式和基础表结构；openpyxl 对部分宏、嵌入对象、切片器或厂商扩展并不保真。只使用 `.xlsx`，复杂对象另存原文件，并依靠本地受限备份恢复。
-- macOS 睡眠时整点任务不会持续运行。插电场景可在“系统设置 → 电池 → 选项”开启“显示器关闭时防止在电源适配器供电时自动进入睡眠”；合盖通常仍会睡眠。参见 [Apple 支持](https://support.apple.com/en-ca/guide/mac-help/-mchlfc3b7879/mac)。
-- 后台任务可用 `open-health-agent scheduler install|status|uninstall` 完整管理；Linux 退出登录后能否继续取决于 systemd user linger。macOS 的 AC-only 适配同样提供 `keep-awake-on-ac install|status|uninstall`。
+### 备份和停用
 
-## 项目文档
+当前版本没有一键加密备份。备份 SQLite 真源前，先停止 Hermes gateway 并运行 `open-health-agent scheduler uninstall`，确认没有写入者，再把整个 `~/.open-health-agent` 复制到受控的加密备份位置；只备份 iCloud Excel 不能恢复完整审计状态。恢复后先运行 `open-health-agent doctor`、`export` 和 `context`，再重新启用服务。
+
+完全停用时先执行：
+
+```bash
+open-health-agent scheduler uninstall
+open-health-agent keep-awake-on-ac uninstall
+hermes gateway stop
+hermes gateway uninstall
+ghealth auth logout
+```
+
+随后在 Google 账号/Cloud 项目中撤销授权，按 Hermes 官方方式解除 Weixin，并在确认备份后自行删除 `~/.open-health-agent`、`~/.config/ghealth`、所选 iCloud 工作簿及不再需要的 Hermes 媒体缓存。不要用删除整个 `~/.hermes` 的方式误伤其他 Hermes 配置。
+
+## WorkBuddy、Antigravity 和其他 Agent 宿主
+
+Skill 的行为规范可移植，但仓库安装器当前内置的 `--agent` 选项只有 Hermes、Codex 和 Claude。WorkBuddy、Antigravity 或其他宿主需要：
+
+1. 用宿主自己的标准 Skills 安装方式，或把 Skill 安装到显式目录：
+
+   ```bash
+   ./install.sh --skill-dir '/该宿主的/skills/目录' --timezone Asia/Shanghai
+   ```
+
+2. 验证宿主能读取 `SKILL.md`、私有 `AGENTS.md`，并能执行本地 `open-health-agent` 命令。
+3. 分别验证图片、语音转写、微信/消息通道和后台持久运行，不能只凭宿主名称假定可用。
+
+也可仅安装标准 Skill 说明：
+
+```bash
+npx --yes skills add w2478328197-arch/open-health-agent --agent '*'
+```
+
+这条可选命令要求宿主机已有 Node.js/npm。它不会安装本地 Python 账本、Excel 模板、`ghealth` 或 scheduler。需要完整功能时仍要克隆仓库并运行一次安装器。
+
+## 验收清单
+
+- [ ] 新会话第一次使用先讲解；紧急消息先安全处置。
+- [ ] Hermes 普通对话、Skills、Terminal/Files 正常。
+- [ ] 微信 DM 已改为 pairing/本人 allowlist，群聊 disabled。
+- [ ] 图片和语音分别做过真实能力测试。
+- [ ] Google Health 手机端能看到目标指标。
+- [ ] `ghealth auth status --validate` 通过，OHA 与 ghealth 时区一致。
+- [ ] 手动 `open-health-agent sync` 成功后才安装 scheduler。
+- [ ] `open-health-agent context` 显示截止时间、新鲜度、目标和数据缺口。
+- [ ] 目标、血压、训练和餐食照片都能写入并在 Excel 中看到。
+- [ ] 购买/菜单/计划没有误记为已摄入，重复同步不会增加重复行。
+- [ ] 真实健康数据、Excel、图片、语音、OAuth 文件和 API key 都没有进入 Git。
+
+## 文档与隐私
 
 - [Hermes、模型与微信配置](docs/hermes.md)
-- [架构与写入一致性](docs/architecture.md)
-- [宿主、平台与数据源兼容性](docs/compatibility.md)
+- [完整安装与迁移](skills/open-health-agent/references/installation.md)
+- [数据源与 OAuth](skills/open-health-agent/references/data-sources.md)
+- [架构与一致性](docs/architecture.md)
+- [兼容性](docs/compatibility.md)
+- [账本结构](skills/open-health-agent/references/ledger-schema.md)
+- [健康规则](skills/open-health-agent/references/health-rules.md)
 - [隐私说明](PRIVACY.md)
 - [安全策略](SECURITY.md)
-- Skill 引用：[安装](skills/open-health-agent/references/installation.md) · [数据源](skills/open-health-agent/references/data-sources.md) · [账本结构](skills/open-health-agent/references/ledger-schema.md) · [健康规则](skills/open-health-agent/references/health-rules.md) · [隐私与安全](skills/open-health-agent/references/privacy-safety.md) · [宿主适配](skills/open-health-agent/references/host-adapters.md)
 
-## 隐私与开源贡献
-
-真实健康数据、目标、图片、语音、日志、数据库、Excel、OAuth 文件和 API key 都被排除在 Git 之外。提交 Issue 或测试时只用合成数据。发现安全问题请按 [SECURITY.md](SECURITY.md) 私下报告，不要把密钥或健康信息贴到公开 Issue。
+真实健康数据、目标、图片、语音、日志、数据库、Excel、OAuth 文件和 API key 都被排除在 Git 之外。提交 Issue 和测试只能使用合成数据。发现安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。
 
 项目采用 [Apache License 2.0](LICENSE)。
 
 ## English summary
 
-Open Health Agent is a local-first, auditable personal wellness and fitness Skill. It combines optional Google Health API imports with manual text, voice-transcript, and vision-assisted food/measurement logging; stores an idempotent SQLite ledger; exports a readable Excel view; persists exact user goals locally; and requires fresh health context before personalized advice. The reasoning contract is portable across Agent Skills hosts, while local files, commands, vision, speech, and durable scheduling must be verified per host. It is not a medical device or emergency service.
+Open Health Agent is a local-first personal wellness and fitness Skill for Hermes and other Agent Skills hosts. It combines optional Google Health API imports with WeChat text, trustworthy voice transcripts, and vision-assisted food or measurement logging; stores an idempotent SQLite ledger; exports a readable Excel view; persists exact user goals locally; and requires fresh health context before personalized advice. Host capabilities, device metrics, vision, speech, and durable scheduling must be verified rather than assumed. It is not a medical device or emergency service.

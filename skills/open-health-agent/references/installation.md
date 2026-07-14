@@ -14,18 +14,21 @@ Do not require Google, Weixin, a multimodal model, or iCloud for manual text log
 
 ## 2. Install the project and Skill
 
-Clone the public repository, inspect it, and run the installer from the repository root:
+Clone the public repository and inspect the installer. For the first initialization, choose exactly one of the two commands below; do not run the default command and then the iCloud command.
 
 ```bash
 git clone https://github.com/w2478328197-arch/open-health-agent.git
 cd open-health-agent
 ./install.sh --help
-./install.sh
 ```
 
-The installer should create an isolated runtime, install the ledger dependency, place or link the portable Skill into detected hosts, and initialize a private data home. It must not copy example health data into the user's ledger or collect credentials.
+Default local workbook:
 
-For a first Hermes install in China Standard Time with only the Excel view in iCloud Drive, an explicit example is:
+```bash
+./install.sh --agent hermes --timezone Asia/Shanghai
+```
+
+Or, on macOS with iCloud Drive already enabled, place only the Excel view in iCloud:
 
 ```bash
 ./install.sh \
@@ -34,7 +37,17 @@ For a first Hermes install in China Standard Time with only the Excel view in iC
   --workbook "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Open Health Agent/健康档案.xlsx"
 ```
 
-The external sync boundary applies only to the selected workbook path; keep SQLite and credentials in the default private local home. Installer `--force` only updates differing public Skill copies or the command wrapper. Private `AGENTS.md`, profile, state, database, and workbook remain untouched.
+The installer creates an isolated runtime, installs the ledger dependency, places or links the portable Skill into Hermes, and initializes a private data home. It does not install Hermes or `ghealth`, copy example health data into the user's ledger, or collect credentials.
+
+The external sync boundary applies only to the selected workbook path; keep SQLite and credentials in the default private local home. Installer `--force` only updates differing public Skill copies or the command wrapper. It does not forward force to private initialization, so rerunning the installer does not change an existing workbook path or timezone. To change an existing installation, use the CLI's explicit private-config update:
+
+```bash
+open-health-agent init --force \
+  --timezone Asia/Shanghai \
+  --workbook "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Open Health Agent/健康档案.xlsx"
+```
+
+That command backs up configuration and changes only explicitly supplied fields while preserving private `AGENTS.md`, profile, state, and SQLite. Selecting a new empty workbook path does not migrate custom sheets from the old workbook; selecting an existing workbook preserves ordinary non-managed sheets subject to `openpyxl` limitations. Back up complex workbooks first.
 
 For hosts that support the Agent Skills installer, the portable Skill can also be installed from GitHub:
 
@@ -89,8 +102,8 @@ Use the `ghealth` project maintained in the [Google-Health-API organization](htt
 This repository provides an optional pinned-source builder. Review it before running; it requires Git and Go 1.23+ and does not authorize Google:
 
 ```bash
-scripts/install_ghealth.sh --dry-run
-scripts/install_ghealth.sh
+./scripts/install_ghealth.sh --dry-run
+./scripts/install_ghealth.sh
 ```
 
 The default binary is `~/.local/bin/ghealth`. Open Health Agent also checks that location when it is not on `PATH`; for a different install directory, persist the absolute executable with `open-health-agent init --force --ghealth-command /absolute/path/to/ghealth`.
@@ -98,30 +111,35 @@ The default binary is `~/.local/bin/ghealth`. Open Health Agent also checks that
 1. Make the wearable sync to its manufacturer app.
 2. Connect the manufacturer app to Health Connect on Android or Apple Health on iPhone when supported.
 3. Connect that store to the Google Health app/account and verify that the desired metric appears there.
-4. Follow the [Google Health API setup guide](https://developers.google.com/health/setup) to create the OAuth client, choosing exactly one flow below.
+4. Run `ghealth setup --instructions` and create the **Desktop application** OAuth client it describes. The generic [Google Health API setup page](https://developers.google.com/health/setup) currently documents a Web Server client for applications that integrate with the API directly; that client and its `https://www.google.com` redirect are not the client flow used by this CLI.
 5. Request only the necessary read scopes listed in the [Google Health scope reference](https://developers.google.com/health/scopes).
 6. Authenticate `ghealth`, run a small manual query, and only then enable automated import.
 
-### OAuth path A: Desktop client, interactive on the ledger computer
+### Configure the Desktop OAuth client
 
-Create a **Desktop application** client, download its JSON, and use `ghealth setup` or `ghealth auth login --scopes-preset readonly`. This flow opens a browser and uses a temporary loopback callback on the same computer. Finish with `ghealth auth status --validate`.
-
-### OAuth path B: current Google Web Server client, non-interactive completion
-
-Create a **Web application / Web Server** client as directed by Google's current setup page and register `https://www.google.com` exactly as the authorized redirect URI. Configure `ghealth` with that JSON, then run:
+Keep the downloaded client JSON in a private local directory outside the repository, then use the current `ghealth` release to guide configuration:
 
 ```bash
-ghealth setup --project-id '<project-id>' --client-secret '/private/path/client_secret.json' \
-  --scopes-preset readonly --non-interactive-auth
-# If setup created pending auth, use its emitted auth_url/complete_command;
-# otherwise start it explicitly:
+ghealth setup --instructions
+ghealth setup --scopes-preset readonly
+```
+
+On a computer with a usable browser, authenticate with the Desktop client's temporary loopback/PKCE callback:
+
+```bash
+ghealth auth login --scopes-preset readonly
+ghealth auth status --validate
+```
+
+For a headless shell, use the same **Desktop application** client. Start the non-interactive flow, privately open the emitted URL, then copy only the `code` query parameter from the redirected browser address into the completion command:
+
+```bash
 ghealth auth login --non-interactive --scopes-preset readonly
-# Open the returned auth_url privately and copy only the code query parameter.
 ghealth auth login --complete '<code>'
 ghealth auth status --validate
 ```
 
-Follow the emitted `complete_command`; never paste the authorization code into chat or logs. Do not use the Web client's `https://www.google.com` redirect with the Desktop loopback flow, or a Desktop client with the Web callback instructions.
+Follow the URL and completion instructions emitted by the installed `ghealth` version. Never paste the client JSON, client secret, authorization URL, redirect URL, authorization code, refresh token, or command output containing them into chat, logs, or the repository. Do not create a Web application client with a `https://www.google.com` redirect for `ghealth`; Google's generic Web Server instructions apply when writing a direct API client, not when authorizing this CLI.
 
 Google may impose testing-user, verification, restricted-scope, or production-review requirements. In OAuth **Testing** status, a refresh token may expire after about seven days, so test schedules can later become unauthorized and require a new login. Follow the current [Google Health API user-data policy](https://developers.google.com/health/policies/health-api-developer-user-data-policy) and publishing/verification requirements for longer-lived use.
 
@@ -152,7 +170,7 @@ Only install a background schedule after a successful manual sync and explicit u
 Keep exactly one scheduled writer; disable legacy cron jobs or duplicate importers before enabling it. Use the installed command prefix when customized:
 
 ```bash
-open-health-agent scheduler install
+open-health-agent scheduler install --interval-seconds 3600
 open-health-agent scheduler status
 open-health-agent scheduler uninstall
 ```

@@ -69,7 +69,7 @@ For urgent symptoms or a stated emergency, stop normal coaching and direct the u
 
 ### Google Health
 
-Google Health data can be restricted/sensitive. OAuth testing and production access may have user caps, token-lifetime constraints, verification, and security-review requirements. A consent screen left in **Testing** may issue a refresh token that expires after about seven days. Follow the current [setup guide](https://developers.google.com/health/setup) rather than copying another user's client secret. Use either a Desktop client with `ghealth`'s interactive loopback flow, or the guide's Web Server client with `https://www.google.com` and `ghealth`'s non-interactive/complete flow; do not mix their redirect instructions.
+Google Health data can be restricted/sensitive. OAuth testing and production access may have user caps, token-lifetime constraints, verification, and security-review requirements. A consent screen left in **Testing** may issue a refresh token that expires after about seven days. For this project's pinned `ghealth`, create a **Desktop application** client and use its loopback/PKCE flow; headless authorization still uses that Desktop client with `auth login --non-interactive` followed by `--complete '<code>'`. Google's generic [setup guide](https://developers.google.com/health/setup) currently documents a Web Server client for direct API integrations; do not substitute that client or copy another user's client secret.
 
 ### Hermes Weixin
 

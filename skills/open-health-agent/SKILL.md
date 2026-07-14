@@ -49,6 +49,8 @@ Resolve the data home from `OPEN_HEALTH_AGENT_HOME`; otherwise use `~/.open-heal
 4. Read the returned freshness, selected-date completeness, same-day records, 7-day completed-day baseline, 28-day trend, health constraints, active goals, energy semantics, and data gaps.
 5. After a new record or sync, rebuild context before advising. Never rely only on chat memory or a previously opened workbook.
 
+When one message both reports a health event and asks for advice, read the private rules, attempt the requested durable write first, report its actual result, then rebuild context and advise. A context-read failure does not justify silently skipping a requested recording attempt when the writer is available; a writer failure means the event was not recorded and must be reported as such. Do not create a missing ledger or connect an account merely to make the write succeed unless the user has authorized that setup.
+
 The context comes from the same SQLite truth that produces the Excel health sheets; it is the required machine-readable way to “read the health table.” If local rules or context cannot be read, state exactly what is unavailable. Give only conservative, non-personalized guidance until the missing context is restored.
 
 ### 3. Route to the relevant workflow
@@ -64,15 +66,17 @@ Append `--help` to the installed command prefix to inspect the current command s
 
 Record only events that actually happened.
 
-- A food purchase, recipe idea, menu, shopping list, or eating plan is not consumption. Do not add it to `饮食记录` until the user confirms it was eaten or drunk.
+- A food purchase, recipe idea, menu, shopping list, unopened product, background object, or eating plan is not consumption. Do not add it to `饮食记录` as eaten.
 - Preserve the user's original wording or transcript. Store normalized values separately; never silently rewrite the source statement.
-- If a photo clearly accompanies “I ate this,” estimate food identity and portion as a range, retain the uncertainty and image reference, and let the user correct it. If consumption is ambiguous, ask rather than record.
+- If a photo clearly accompanies “I ate this,” estimate food identity and portion as a range, retain the uncertainty and image reference, briefly echo the consumed item list, and let the user correct it.
+- In a dedicated health or diet conversation, a standalone close-up meal photo may be treated as confirmation to log actual consumption by default when there are no purchase, menu, recipe, unopened-package, planning, leftover-only, or background-object cues. Briefly echo what will be counted before writing. If the food identity or consumption context is materially ambiguous, ask one targeted question instead of guessing. Do not ask the user to weigh food; estimate a central portion and plausible range from visible count, size, labels, and context.
 - If the model cannot inspect images, ask for a text description or, with the user's consent, use a configured vision-capable model. Do not infer an image from a filename or placeholder.
 - If a voice message has no trustworthy transcript and no speech-to-text tool is available, ask for text. Do not invent a transcript.
 - Manual measurements should include date/time, metric, value, unit, source, entry method, original wording, and confidence. A blood-pressure record needs both systolic and diastolic values.
 - Corrections update or supersede the existing stable record. Do not append a contradictory duplicate.
 - Missing, unauthorized, not-worn, and not-yet-synced values stay null/blank. Never encode them as zero.
 - Store estimates, source, confidence, and coverage. Do not claim micronutrient completeness from one photo or diagnose a deficiency from food logging.
+- After every recording attempt, report whether the write succeeded, the stable record ID when written, and material confidence or uncertainty. Do not claim that a chat acknowledgement alone proves durable recording.
 
 Export the workbook only through the local writer so locking, atomic replacement, backups, permissions, and preserved non-health sheets remain intact. Never let two writers save the workbook independently.
 

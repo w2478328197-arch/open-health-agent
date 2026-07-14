@@ -45,10 +45,12 @@ hermes
 
 ```bash
 ./install.sh --help
-./install.sh
+./install.sh --agent hermes --timezone Asia/Shanghai
 ```
 
-安装器会建立稳定的 `open-health-agent` 命令，并打印带私有 `--home` 的 `Command:` 前缀。默认目录可运行 `open-health-agent doctor`；自定义目录或命令不在 `PATH` 时使用安装器打印的完整前缀。不要改用未安装 `openpyxl` 的任意系统 Python。
+首次初始化只能选一次工作簿路径；要把 Excel 放进 iCloud，应在这条首次安装命令上直接加 `--workbook '<路径>'`，不要先普通安装再运行第二遍。已经安装后改路径或时区，使用 `open-health-agent init --force --workbook '<路径>' --timezone Asia/Shanghai`；installer 的 `--force` 不会改私有配置。完整选择见[安装文档](../skills/open-health-agent/references/installation.md)。
+
+安装器会建立稳定的 `open-health-agent` 命令，并打印带私有 `--home` 的 `Command:` 前缀。它只安装本项目的 Skill、runtime、wrapper 和私有账本，不安装 Hermes 或 `ghealth`。默认目录可运行 `open-health-agent doctor`；自定义目录或命令不在 `PATH` 时使用安装器打印的完整前缀。不要改用未安装 `openpyxl` 的任意系统 Python。
 
 如果用了自定义 `--home`，请在 Hermes gateway 的持久启动环境中设置同一个 `OPEN_HEALTH_AGENT_HOME`，或让调用始终保留安装器打印的 `--home` 前缀。只在同一受信任系统用户下这样做；不要把私有目录写进公开 `SKILL.md`。交互式 shell 临时设置的环境变量不一定会被后台 gateway 或 scheduler 继承。
 
@@ -60,7 +62,7 @@ Hermes 的 Skill 真源目录通常是 `~/.hermes/skills/`；安装器会处理 
 hermes chat -q "/open-health-agent 帮我开始建立健康档案"
 ```
 
-第一条回复应先说明本地账本、可选数据链路、照片/语音能力、第三方处理和非医疗边界，然后再执行用户已经明确要求的动作。第三方说明至少点明设备厂商、Apple Health/Health Connect 的系统账号与健康数据层、Google、微信/腾讯、模型与独立 STT/视觉服务，以及用户选择的 iCloud/云盘。
+第一条非紧急回复应先说明本地账本、可选数据链路、照片/语音能力、第三方处理和非医疗边界，然后再执行用户已经明确要求的动作。第三方说明至少点明设备厂商、Apple Health/Health Connect 的系统账号与健康数据层、Google、微信/腾讯、模型与独立 STT/视觉服务，以及用户选择的 iCloud/云盘。若第一条消息是急症或明确紧急情况，先给当地急救/紧急处置方向，不能先运行说明、同步、记账或 context。
 
 说明完成后，可把它作为本地安装审计记录下来；这不是跨会话免说明标志：
 
@@ -81,7 +83,7 @@ hermes gateway setup
 在向导中选择 Weixin，扫码并在手机确认。然后先用前台方式验证：
 
 ```bash
-hermes gateway
+hermes gateway run
 ```
 
 验证完成后，可在 macOS/Linux 安装后台服务：
@@ -96,7 +98,7 @@ Hermes 的 [CLI reference](https://hermes-agent.nousresearch.com/docs/reference/
 
 ### 访问策略
 
-当前 Hermes Weixin 的默认入站 DM 策略是 `open`；个人健康场景不能沿用它。**在发送任何健康文字、照片或语音前**，先启用 pairing，或配置 allowlist 只允许自己的 Weixin user ID；禁用群聊，再用不敏感消息验证实际入站身份。iLink bot 是独立联系人；allowlist 是入站过滤，不是邀请机制。策略仍为 `open` 时不要发送健康数据，并以安装版本的官方文档复核默认值是否变化。
+当前 Hermes Weixin 的默认入站 DM 策略是 `open`；个人健康场景不能沿用它。扫码后先在 `~/.hermes/.env` 设置 `WEIXIN_DM_POLICY=pairing` 和 `WEIXIN_GROUP_POLICY=disabled`，前台运行 gateway，只发送一条不敏感消息，并从日志/入站事件取得自己的 user ID。然后改成 `WEIXIN_DM_POLICY=allowlist`、`WEIXIN_ALLOWED_USERS=<自己的 ID>`、`WEIXIN_GROUP_POLICY=disabled`，重启 gateway。**在完成 allowlist 前不要发送任何健康文字、照片或语音。** iLink bot 是独立联系人；allowlist 是入站过滤，不是邀请机制。策略仍为 `open` 时不要发送健康数据，并以安装版本的官方文档复核默认值是否变化。
 
 微信入站可包含图片、文件、视频和语音。Hermes 会下载/解密媒体供 Agent 处理；当前版本可能缓存于 `~/.hermes/cache/images`、`audio`、`videos`、`documents`。缓存行为随 Hermes 版本和媒体类型变化，不能承诺自动删除，尤其音频/视频可能保留。限制该目录的本机访问权限，按当前版本核查并清理不再需要的媒体。媒体会经过腾讯和本机，也可能发送给已配置模型、STT 或视觉服务商。语音只有在微信提供转写或另有 STT 时才是可用文本。
 
@@ -108,38 +110,35 @@ Hermes 的 [CLI reference](https://hermes-agent.nousresearch.com/docs/reference/
 设备 → 厂商 App → Health Connect/Apple Health → Google Health
 ```
 
-随后按 [Google Health API OAuth 设置](https://developers.google.com/health/setup)创建自己的 client，并按[官方 scope 列表](https://developers.google.com/health/scopes)只授权需要的读取项。`ghealth` 使用的是 [Google-Health-API/google-health-cli](https://github.com/Google-Health-API/google-health-cli)。不要复制别人的 OAuth client secret 或 token。
-
-当前 Google 指南与 `ghealth` 的交互式向导展示的是两条不同但都可用的授权路径，只选一条，不要混用 client 类型与 redirect URI：
-
-### 路径 A：Desktop client + 本机交互式浏览器
-
-创建 **Desktop application** OAuth client，下载 JSON，然后在运行账本的同一台电脑执行：
+`ghealth` 使用的是 [Google-Health-API/google-health-cli](https://github.com/Google-Health-API/google-health-cli)。先让已安装的版本输出配置说明，再按说明创建自己的 **Desktop application** OAuth client；按[官方 scope 列表](https://developers.google.com/health/scopes)只授权需要的读取项。不要复制别人的 OAuth client secret 或 token。
 
 ```bash
-ghealth setup
-# 或已经完成配置后：
+ghealth setup --instructions
+ghealth setup --scopes-preset readonly
+```
+
+Google 的通用 [Health API OAuth 设置页](https://developers.google.com/health/setup)目前介绍的是开发者自己编写直接 API 客户端时使用的 **Web Server** client 和 `https://www.google.com` redirect。它不是这套 `ghealth` CLI 的授权方式；不要为了 `ghealth` 创建该 Web client，也不要把这两种回调流程混用。
+
+### 有浏览器：本机交互式授权
+
+`ghealth` 的 Desktop client 使用临时 loopback/PKCE 回调。在运行账本的电脑执行：
+
+```bash
 ghealth auth login --scopes-preset readonly
 ghealth auth status --validate
 ```
 
-该流程临时监听本机 loopback 地址并完成浏览器回调，适合有浏览器的本地 macOS/Linux。不要拿只登记了 `https://www.google.com` 的 Web client 跑这个 loopback 交互流程。
+### 无图形浏览器：非交互式完成授权
 
-### 路径 B：Google 当前 Web Server client + 非交互式复制 code
-
-按 Google 当前设置页创建 **Web application / Web Server** client，并把授权 redirect URI 精确登记为 `https://www.google.com`。把下载的 JSON 交给 `ghealth` 配置后，以非交互式方式开始授权：
+无头环境仍然使用同一个 **Desktop application** client。先启动非交互式流程，在自己的浏览器中私下打开命令输出的地址，再从回跳地址栏只复制 `code` 查询参数交给完成命令：
 
 ```bash
-ghealth setup --project-id '<project-id>' --client-secret '/private/path/client_secret.json' \
-  --scopes-preset readonly --non-interactive-auth
-# 若 setup 已经建立 pending auth，直接使用它打印的 auth_url/complete_command；否则运行：
 ghealth auth login --non-interactive --scopes-preset readonly
-# 在自己的浏览器打开输出的 auth_url；同意后从跳转地址栏复制 code 参数
 ghealth auth login --complete '<code>'
 ghealth auth status --validate
 ```
 
-以命令输出的 `complete_command` 为准。授权 code 只在本机终端粘贴，不要发进聊天或日志。Web client 的 `https://www.google.com` 回调与 Desktop client 的 loopback 回调不可互换。
+以已安装 `ghealth` 输出的 URL 和完成说明为准。client JSON、client secret、授权 URL、完整 redirect URL、授权 code、refresh token 及包含这些信息的命令输出都只留在私有本机环境，不要发进聊天、日志或仓库。
 
 如果 OAuth consent screen 仍处于 **Testing**，refresh token 可能约 7 天后失效；定时任务随后会变成未授权。开发测试时把重新授权纳入预期，长期使用则按 Google 当前发布、验证和受限 scope 要求处理，而不是把 token 过期误判成没有健康数据。
 
@@ -161,7 +160,7 @@ open-health-agent doctor
 只在手动同步成功后安装一个小时任务，并停用旧 cron/launchd/importer，避免双写：
 
 ```bash
-open-health-agent scheduler install
+open-health-agent scheduler install --interval-seconds 3600
 open-health-agent scheduler status
 # 停用并移除本项目的小时任务
 open-health-agent scheduler uninstall
