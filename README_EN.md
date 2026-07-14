@@ -140,11 +140,17 @@ git --version
 python3 --version
 ```
 
-The local ledger requires Python 3.10+. Go 1.23+, a Google account, the Google Health App, and a Google Cloud OAuth client are required only when wearable import is enabled. Text-only manual logging does not require Google, WeChat, a vision model, or iCloud.
+The local ledger always requires Python 3.10+. Go 1.23+ is required **only when this repository builds `ghealth` from source**; manual-only mode, or a machine with a compatible `ghealth` executable already installed, does not need Go for OHA itself. A Google account, the Google Health App, and a Google Cloud OAuth client are required only when wearable import is enabled. Text-only manual logging does not require Google, WeChat, a vision model, or iCloud.
 
-If dependencies are missing, macOS users can run `xcode-select --install` for Git/Command Line Tools and install Python 3.10+ from the [official Python downloads](https://www.python.org/downloads/). For full wearable mode, install Go 1.23+ from the [official Go downloads](https://go.dev/dl/). Homebrew users may install Git, Python, and Go through Homebrew. On Linux, use the distribution package manager and verify the actual versions. Microsoft Excel is not required to generate `.xlsx`, but viewing the workbook requires Excel, Numbers, LibreOffice, or another compatible application.
+On a clean Mac, run `xcode-select --install` first, wait for Command Line Tools to finish, and reopen the terminal. It supplies Git for cloning this repository and building from source. Then install and verify Python 3.10+ from the [official Python downloads](https://www.python.org/downloads/). Install Go 1.23+ from the [official Go downloads](https://go.dev/dl/) only if you choose to build `ghealth` from source. Homebrew users may install these dependencies through Homebrew. On Linux, use the distribution package manager and verify the actual versions.
 
-This guide uses `Asia/Shanghai` as an example. Users outside China Standard Time must replace the timezone in OHA initialization, `ghealth config`, and every other example with their own [IANA timezone](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones), such as `Europe/Berlin` or `America/New_York`. Do not use ambiguous abbreviations such as `CST`.
+Microsoft Excel is not required to generate `.xlsx`. Excel, Numbers, LibreOffice, or another compatible application is only a viewer/export surface; rendering and round-tripping may differ between applications. Do not directly edit managed health sheets in any of them. SQLite remains the source of truth, and complex workbooks should be backed up before migration.
+
+This guide uses `Asia/Shanghai` as an example, **not a copy-paste default**. Set the shell variable below before continuing. Replace it with your actual [IANA timezone](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones), such as `Europe/Berlin` or `America/New_York`, unless Shanghai time is correct for you. OHA initialization, `ghealth config`, and every later command must use the same value. Do not use ambiguous abbreviations such as `CST`.
+
+```bash
+OHA_TIMEZONE='Asia/Shanghai' # Example: replace this with your actual IANA timezone
+```
 
 ## Where should the Skill be installed?
 
@@ -157,7 +163,7 @@ Install the Skill into the Agent host that actually receives the user's messages
 For WeChat only, install with `--agent hermes`. To make the same Skill available in both Hermes and Codex, repeat the option in the **same** installer run:
 
 ```bash
-./install.sh --agent hermes --agent codex --timezone Asia/Shanghai
+./install.sh --agent hermes --agent codex --timezone "$OHA_TIMEZONE"
 ```
 
 Both hosts use the same private ledger by default. Do not create two independent SQLite writers or two schedulers.
@@ -168,7 +174,7 @@ This is the reference path: a macOS or Linux computer runs Hermes, the ledger, a
 
 ### 1. Install and verify Hermes
 
-On macOS, the recommended route is the [Hermes Desktop installer](https://hermes-agent.nousresearch.com/docs/getting-started/installation); Hermes documents that it installs both Desktop and CLI. Close and reopen the terminal after installation, then verify:
+On macOS, the recommended route is the [Hermes Desktop installer](https://hermes-agent.nousresearch.com/docs/getting-started/installation); Hermes documents that it installs both the Desktop UI and CLI, so do not run the CLI installer again. A headless macOS, Linux, or WSL2 host may install only the CLI. The WeChat path depends on the CLI and gateway; the Desktop window does not need to remain open. Close and reopen the terminal after installation, then verify:
 
 ```bash
 command -v hermes
@@ -176,15 +182,23 @@ hermes version
 hermes doctor
 ```
 
-macOS, Linux, and WSL2 users may also use the official CLI installer:
+For a CLI-only installation, the more auditable route is to download the official script, inspect it locally, and then execute it:
 
 ```bash
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+HERMES_INSTALLER="$(mktemp)"
+curl -fsSL https://hermes-agent.nousresearch.com/install.sh -o "$HERMES_INSTALLER"
+less "$HERMES_INSTALLER"
+bash "$HERMES_INSTALLER"
+rm -f "$HERMES_INSTALLER"
 command -v hermes
 hermes doctor
 ```
 
-If you do not want to execute a remote script directly, use the Desktop installer or download and inspect Hermes's official script before running it.
+The pipe form below is a convenience option that immediately executes whatever the server returns at that moment. Use it only after checking the official domain and accepting that trust boundary, preferably after reviewing the script:
+
+```bash
+curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+```
 
 Configure a model or login method:
 
@@ -246,23 +260,31 @@ WeChat may deliver an image or voice file without the model being able to unders
 
 ### 3. Install Open Health Agent: choose one path and run it once
 
-Clone the repository:
+OHA does not recommend a `curl | bash` installation. Prefer cloning the repository, inspecting the exact revision, and running the local installer from that revision:
 
 ```bash
-git clone https://github.com/w2478328197-arch/open-health-agent.git
+git clone --no-checkout https://github.com/w2478328197-arch/open-health-agent.git
 cd open-health-agent
+git fetch --tags --force
+git tag --list
+# If you have reviewed a release tag, replace origin/main below with that tag:
+git checkout --detach origin/main
+git show --stat --oneline HEAD
+less install.sh
 ```
+
+Use `git rev-parse HEAD` to record the exact installed commit. A release tag still needs a trusted provenance check; when no reviewed tag is available, pinning and reviewing one commit is more auditable than executing a mutable remote script. To upgrade later, return to the clone, fetch the new tag/commit, review the diff, and then rerun the installer.
 
 Option A — WeChat through Hermes, with the default local Excel path:
 
 ```bash
-./install.sh --agent hermes --timezone Asia/Shanghai
+./install.sh --agent hermes --timezone "$OHA_TIMEZONE"
 ```
 
 Option B — WeChat through Hermes and optional local use from Codex, with the default local Excel path:
 
 ```bash
-./install.sh --agent hermes --agent codex --timezone Asia/Shanghai
+./install.sh --agent hermes --agent codex --timezone "$OHA_TIMEZONE"
 ```
 
 Option C — place only the Excel view in iCloud Drive on macOS; add `--agent codex` to the same command only if you also want the Skill in Codex:
@@ -270,7 +292,7 @@ Option C — place only the Excel view in iCloud Drive on macOS; add `--agent co
 ```bash
 ./install.sh \
   --agent hermes \
-  --timezone Asia/Shanghai \
+  --timezone "$OHA_TIMEZONE" \
   --workbook "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Open Health Agent/Health Ledger.xlsx"
 ```
 
@@ -282,19 +304,20 @@ The installer puts the command in `~/.local/bin` by default. If the current term
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-This affects only the current terminal. To keep it, add the same line to `~/.zshrc` or `~/.bashrc`; alternatively, always use the complete `Command:` prefix printed by the installer. A successful interactive terminal test does not prove that the background Hermes gateway can execute the command. Verify it from WeChat later.
+This affects only the current terminal. To keep it, add the same line to `~/.zshrc` or `~/.bashrc`; alternatively, always use the complete `Command:` prefix printed by the installer. Background launchd/systemd services normally do not read interactive shell startup files, so do not rely on a temporary `PATH`, `~`, or `$HOME` expansion in a service definition. For background configuration and Agent troubleshooting, copy the installer's complete absolute `Command:` (for example, `/Users/your-name/.local/bin/open-health-agent`). An interactive terminal success does not replace a live WeChat test.
 
-If the Hermes gateway was already running when the new Skill was installed, restart it once:
+After every OHA Skill install or update, restart the Hermes gateway so the background process reloads the Skill and command, then verify its status:
 
 ```bash
 hermes gateway restart
+hermes gateway status
 ```
 
 If the project was already installed and you now need to change the timezone, move the view to iCloud, or select an existing `.xlsx`, run:
 
 ```bash
 open-health-agent init --force \
-  --timezone Asia/Shanghai \
+  --timezone "$OHA_TIMEZONE" \
   --workbook "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Open Health Agent/Health Ledger.xlsx"
 ```
 
@@ -345,7 +368,7 @@ Follow the instructions emitted by `ghealth`, enable the Google Health API in Go
 ```bash
 ghealth setup --scopes-preset readonly
 ghealth auth status --validate
-ghealth config set timezone Asia/Shanghai
+ghealth config set timezone "$OHA_TIMEZONE"
 ```
 
 `ghealth setup` uses a local loopback callback with PKCE for browser authorization. Google's generic API setup page also describes a **Web Server** client and a `https://www.google.com` redirect URI for developers writing their own API client. That is a different flow and must not replace the Desktop client required by this CLI.
@@ -394,7 +417,7 @@ Check all four points:
 
 ### 7. Enable hourly synchronization and AC-power wakefulness
 
-Install the hourly job only after manual `sync` succeeds and the user explicitly consents to background operation:
+Install the hourly job only after `open-health-agent sync` has been run manually as the **same operating-system user, with the same Google profile and timezone**, and its JSON explicitly reports `status=success`. A zero process exit code or an overall `doctor` result of `ok` does not replace this acceptance check. Then obtain the user's explicit consent for background operation:
 
 ```bash
 open-health-agent onboarding grant-consent
@@ -402,7 +425,9 @@ open-health-agent scheduler install --interval-seconds 3600
 open-health-agent scheduler status
 ```
 
-The installer resolves and stores the absolute `ghealth` path and active profile, so the job does not depend on an interactive shell's temporary `PATH`. Immediately after installation, `status` proves only that the job definition and service exist. Keep the computer awake, wait past the next roughly 3600-second trigger, run `scheduler status` and `open-health-agent context` again, and check Excel's sync log for a new successful timestamp.
+The installer resolves and stores the absolute `ghealth`, Python, and OHA entry-point paths plus the active profile, so the job does not depend on an interactive shell's temporary `PATH`. If those files are moved/reinstalled, the `ghealth` profile changes, or the timezone changes, first complete another successful manual `sync` and then rerun `scheduler install` to refresh the definition.
+
+Immediately after installation, `status` proves only that the job definition and service exist; it does not prove an automatic sync. Before installing, note the latest timestamp in Excel's synchronization log. After installing, do not trigger another manual `sync`: keep the installing user signed in, the computer awake, and the network available until a log entry appears **after the installation time**. Run `scheduler status` and `open-health-agent context` again, and confirm that the new row also has `status=success`. Only then has the first automatic run passed acceptance.
 
 The Hermes gateway and health scheduler are two separate services:
 
@@ -411,7 +436,9 @@ The Hermes gateway and health scheduler are two separate services:
 
 Both must run as the same trusted operating-system user. Disable any old cron job, importer, or second Excel writer.
 
-This is an approximately every-3600-seconds schedule, not a promise to run exactly at the top of each clock hour. Network loss, sleep, and upstream delay may cause failure, partial success, or latency; later jobs use an overlapping lookback to recover late data. A macOS user launchd job normally runs only after that user signs in. After a reboot, sign in and check `scheduler status` once.
+This is an approximately every-3600-seconds schedule, not a promise to run exactly at the top of each clock hour. Network loss, sleep, expired OAuth, and upstream delay may cause failure, partial success, or latency; a failure is never relabeled as success, and the service tries again at a later interval. After restoring network/authorization, verify a manual `sync`, rerun `scheduler install` if needed, and repeat the automatic-run acceptance above. Later jobs deliberately use an **overlapping data lookback window** to recover late data and deduplicate it; this is not permission to run two schedulers or two Excel writers.
+
+macOS launchd and the Linux systemd user timer belong to the user who installed them. A macOS user job normally runs only after that user signs in. After an operating-system reboot, sign in, check both `hermes gateway status` and `open-health-agent scheduler status`, and wait for a new automatic-sync record. Restart the Hermes gateway if it did not recover. If the scheduler definition or absolute paths no longer match, complete a manual sync and reinstall the scheduler.
 
 A fully sleeping Mac will not continuously execute hourly jobs. When plugged in, go to **System Settings → Battery → Options** and enable the option that prevents automatic sleep on the power adapter while the display is off, and keep a MacBook open. Or use the project's reversible AC-only helper:
 
@@ -545,7 +572,7 @@ The Skill's behavior rules are portable, but the repository installer currently 
 1. Use that host's standard Skill installation method, or install to an explicit Skill directory:
 
    ```bash
-   ./install.sh --skill-dir '/path/to/that/host/skills' --timezone Asia/Shanghai
+   ./install.sh --skill-dir '/path/to/that/host/skills' --timezone "$OHA_TIMEZONE"
    ```
 
 2. Verify that the host can read `SKILL.md` and the private `AGENTS.md`, and can execute the local `open-health-agent` command.

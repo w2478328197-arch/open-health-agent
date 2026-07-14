@@ -122,11 +122,17 @@ git --version
 python3 --version
 ```
 
-本地账本需要 Python 3.10+。只有启用可穿戴导入时才需要 Go 1.23+、Google 账号、Google Health App 和 Google Cloud OAuth client。纯文字手工记录不需要 Google、微信、视觉模型或 iCloud。
+本地账本始终需要 Python 3.10+。Go 1.23+ **只在使用本仓库脚本从源码构建 `ghealth` 时需要**；纯手工模式，或已经安装了兼容 `ghealth` 可执行文件的电脑，不需要为了 OHA 另外安装 Go。Google 账号、Google Health App 和 Google Cloud OAuth client 只在启用可穿戴导入时需要。纯文字手工记录不需要 Google、微信、视觉模型或 iCloud。
 
-缺少依赖时：macOS 可先运行 `xcode-select --install` 安装 Git/Command Line Tools，并从 [Python 官方下载页](https://www.python.org/downloads/)安装 Python 3.10+；完整可穿戴模式再从 [Go 官方下载页](https://go.dev/dl/)安装 Go 1.23+。使用 Homebrew 的用户也可以通过 Homebrew 安装 Git、Python 和 Go。Linux 请使用发行版包管理器，并确认实际版本满足要求。系统不必安装 Microsoft Excel 才能生成 `.xlsx`，但查看工作簿需要 Excel、Numbers、LibreOffice 或其他兼容应用。
+全新的 Mac 应先运行 `xcode-select --install`，等 Command Line Tools 安装完成后重新打开终端；它提供下面克隆仓库和源码构建所需的 Git。再从 [Python 官方下载页](https://www.python.org/downloads/)安装并确认 Python 3.10+。只有选择源码构建 `ghealth` 时，才从 [Go 官方下载页](https://go.dev/dl/)安装 Go 1.23+。使用 Homebrew 的用户也可以通过 Homebrew 安装这些依赖；Linux 请使用发行版包管理器，并确认实际版本满足要求。
 
-本文使用 `Asia/Shanghai` 作为示例。中国标准时间以外的用户必须把 OHA 初始化、`ghealth config` 和其他示例里的时区全部替换成自己的 [IANA 时区名称](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)，例如 `Europe/Berlin` 或 `America/New_York`；不要使用含义不唯一的 `CST` 等缩写。
+系统不必安装 Microsoft Excel 就能生成 `.xlsx`。Excel、Numbers、LibreOffice 或其他兼容应用只用于查看/导出这份视图；不同应用的格式呈现和再次保存可能不同。不要在其中直接改受管健康 sheet，SQLite 始终是真源；复杂工作簿迁移前请另做备份。
+
+本文使用 `Asia/Shanghai` 作为示例，**不是可以照抄的默认值**。继续前先设置下面这个当前终端变量；非上海时区必须替换成自己的 [IANA 时区名称](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)，例如 `Europe/Berlin` 或 `America/New_York`。OHA 初始化、`ghealth config` 和后续所有命令必须使用同一个值；不要使用含义不唯一的 `CST` 等缩写。
+
+```bash
+OHA_TIMEZONE='Asia/Shanghai' # 示例：继续前替换成你的实际 IANA 时区
+```
 
 ## 从零安装：Hermes + 微信 + Google Health
 
@@ -134,7 +140,7 @@ python3 --version
 
 ### 1. 安装并验证 Hermes
 
-macOS 推荐使用 [Hermes Desktop 安装器](https://hermes-agent.nousresearch.com/docs/getting-started/installation)；Hermes 官方说明该安装器同时安装 Desktop 和 CLI。安装完成后关闭并重新打开终端，验证：
+macOS 推荐使用 [Hermes Desktop 安装器](https://hermes-agent.nousresearch.com/docs/getting-started/installation)；Hermes 官方说明该安装器同时安装 Desktop 图形界面和 CLI，所以不要再重复跑 CLI 安装器。无图形界面的 macOS、Linux 或 WSL2 可以只装 CLI；微信链路实际依赖的是 CLI 和 gateway，Desktop 窗口不需要一直打开。安装完成后关闭并重新打开终端，验证：
 
 ```bash
 command -v hermes
@@ -142,15 +148,23 @@ hermes version
 hermes doctor
 ```
 
-macOS、Linux 或 WSL2 也可使用官方 CLI 安装命令：
+CLI-only 路线更稳妥的做法是先把官方安装脚本下载到本地、审阅，再执行：
 
 ```bash
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+HERMES_INSTALLER="$(mktemp)"
+curl -fsSL https://hermes-agent.nousresearch.com/install.sh -o "$HERMES_INSTALLER"
+less "$HERMES_INSTALLER"
+bash "$HERMES_INSTALLER"
+rm -f "$HERMES_INSTALLER"
 command -v hermes
 hermes doctor
 ```
 
-不希望直接执行远程脚本时，使用 Desktop 安装器，或先下载并审阅 Hermes 官方脚本再运行。
+下面的管道写法只是方便选项，会立即执行当时服务器返回的内容；只有在确认官方域名并愿意信任、最好已经审阅脚本后才使用：
+
+```bash
+curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+```
 
 配置模型或登录方式：
 
@@ -223,23 +237,31 @@ Weixin/iLink Bot 的可用性取决于当前 Hermes 版本、腾讯账号和地�
 
 Hermes 和 Codex 的 Skill 副本都调用同一个本机 `open-health-agent` 命令和同一私有数据目录；不要为两个宿主建立两份会互相分叉的账本。Codex 安装后通常要开启一个新任务才能发现新 Skill；Hermes gateway 在安装后要重启。
 
-先克隆仓库：
+OHA 不推荐 `curl | bash` 安装。优先克隆仓库、查看将要安装的精确修订，再在该修订上运行本地安装器：
 
 ```bash
-git clone https://github.com/w2478328197-arch/open-health-agent.git
+git clone --no-checkout https://github.com/w2478328197-arch/open-health-agent.git
 cd open-health-agent
+git fetch --tags --force
+git tag --list
+# 有已审阅的发布 tag 时，下一行把 origin/main 换成该 tag：
+git checkout --detach origin/main
+git show --stat --oneline HEAD
+less install.sh
 ```
+
+`git rev-parse HEAD` 可以记录这次安装的精确 commit。发布 tag 仍需核对来源；没有已审阅 tag 时，固定并审阅一个 commit 比直接执行可变的远程脚本更可复核。以后升级时回到仓库、获取新 tag/commit、审阅差异，再重新运行安装器。
 
 选项 A：Excel 使用默认本地路径。只在微信使用时运行：
 
 ```bash
-./install.sh --agent hermes --timezone Asia/Shanghai
+./install.sh --agent hermes --timezone "$OHA_TIMEZONE"
 ```
 
 如果还要让 Codex 使用同一个 Skill，**改为只运行下面这一条**，不要先运行上一条：
 
 ```bash
-./install.sh --agent hermes --agent codex --timezone Asia/Shanghai
+./install.sh --agent hermes --agent codex --timezone "$OHA_TIMEZONE"
 ```
 
 选项 B：仅把 Excel 视图放进 iCloud Drive：
@@ -247,7 +269,7 @@ cd open-health-agent
 ```bash
 ./install.sh \
   --agent hermes \
-  --timezone Asia/Shanghai \
+  --timezone "$OHA_TIMEZONE" \
   --workbook "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Open Health Agent/健康档案.xlsx"
 ```
 
@@ -259,19 +281,20 @@ cd open-health-agent
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-这只影响当前终端。需要长期使用时，把同一行加入 `~/.zshrc` 或 `~/.bashrc`；也可以始终使用安装器最后打印的完整 `Command:` 前缀。后台 Hermes gateway 是否能执行该命令，必须以后面的微信实测为准，不能用当前终端成功来代替。
+这只影响当前终端。需要长期使用时，把同一行加入 `~/.zshrc` 或 `~/.bashrc`；也可以始终使用安装器最后打印的完整 `Command:` 前缀。launchd/systemd 等后台服务通常不会读取交互式 shell 的配置，不能依赖临时 `PATH`、`~` 或 `$HOME` 展开；给后台配置和 Agent 排障时，应复制安装器打印的完整绝对 `Command:`（例如 `/Users/你的用户名/.local/bin/open-health-agent`）。当前终端成功不能代替微信端实测。
 
-如果 Hermes gateway 已经在后台运行，安装新 Skill 后重启一次：
+安装或更新 OHA Skill 后必须重启 Hermes gateway，让后台进程重新发现 Skill 和命令；然后检查状态：
 
 ```bash
 hermes gateway restart
+hermes gateway status
 ```
 
 如果已经安装过，现在才想改时区、改成 iCloud 或选择一份已有 `.xlsx`，使用：
 
 ```bash
 open-health-agent init --force \
-  --timezone Asia/Shanghai \
+  --timezone "$OHA_TIMEZONE" \
   --workbook "$HOME/Library/Mobile Documents/com~apple~CloudDocs/Open Health Agent/健康档案.xlsx"
 ```
 
@@ -322,7 +345,7 @@ ghealth setup --instructions
 ```bash
 ghealth setup --scopes-preset readonly
 ghealth auth status --validate
-ghealth config set timezone Asia/Shanghai
+ghealth config set timezone "$OHA_TIMEZONE"
 ```
 
 `ghealth setup` 会使用本机 loopback + PKCE 完成浏览器授权。Google 的通用 API 设置页还介绍了 **Web Server** client 和 `https://www.google.com` redirect URI；那是直接编写 API 客户端的流程，不能拿来替代这个 CLI 所需的 Desktop client。
@@ -369,7 +392,7 @@ open-health-agent context
 
 ### 7. 启用每小时同步和插电待机
 
-只有手动 `sync` 成功、用户明确同意后台运行后，才安装小时任务：
+只有在**同一系统用户、同一 Google profile、同一时区**下手工运行 `open-health-agent sync`，并确认 JSON 明确为 `status=success` 后，才让用户授权并安装小时任务；命令退出码为 0 或 `doctor` 为 `ok` 都不能替代这项验收：
 
 ```bash
 open-health-agent onboarding grant-consent
@@ -377,7 +400,9 @@ open-health-agent scheduler install --interval-seconds 3600
 open-health-agent scheduler status
 ```
 
-安装时 scheduler 会解析并保存当前 `ghealth` 的绝对路径和活动 profile，不依赖交互式 shell 的临时 `PATH`。刚安装后的 `status` 只证明任务定义和服务状态，不证明它已经自动同步过。保持电脑唤醒，等过下一个约 3600 秒触发点后再次运行 `scheduler status` 和 `open-health-agent context`，并检查 Excel 的 `同步日志` 是否出现新的成功时间戳。
+安装时 scheduler 会解析并保存当前 `ghealth`、Python 和 OHA 入口的绝对路径以及活动 profile，不依赖交互式 shell 的临时 `PATH`。若之后移动/重装这些文件、切换 `ghealth` profile 或改变时区，应先重新手工 `sync` 成功，再重新运行 `scheduler install` 刷新定义。
+
+刚安装后的 `status` 只证明任务定义和服务状态，不证明它已经自动同步过。安装前先记下 Excel `同步日志` 的最后时间戳；安装后不要再手工触发 `sync`，保持该用户已登录、电脑唤醒且联网，等到出现**晚于安装时间**的新日志。随后再次运行 `scheduler status` 和 `open-health-agent context`，确认新一行也是 `status=success`，才算第一次自动运行验收通过。
 
 Hermes gateway 和健康 scheduler 是两个不同的后台服务：
 
@@ -386,7 +411,9 @@ Hermes gateway 和健康 scheduler 是两个不同的后台服务：
 
 两者都必须以同一受信任的系统用户运行。不要再并行保留旧 cron、旧导入脚本或第二个 Excel 写入器。
 
-这是约每 3600 秒运行一次，不保证在钟表整点触发。断网、睡眠或上游延迟会产生失败、部分成功或延迟；后续任务会用重叠回看窗口补抓晚到数据。macOS 用户级 launchd 任务通常要在用户登录后运行；重启后登录并检查一次 `scheduler status`。
+这是约每 3600 秒运行一次，不保证在钟表整点触发。断网、睡眠、OAuth 失效或上游延迟会产生失败、部分成功或延迟；失败不会变成成功，服务会在后续间隔再次尝试。恢复联网/授权后先手工 `sync` 验证，必要时重新运行 `scheduler install`，再按上一段验收一次自动运行。后续任务会用**重叠的数据回看窗口**补抓晚到数据并去重；这不表示可以运行两个 scheduler 或两个 Excel 写入器。
+
+macOS 的 launchd 和 Linux 的 systemd user timer 都属于安装它们的用户。macOS 用户级任务通常只有在该用户登录后才运行；操作系统重启后先登录，再检查 `hermes gateway status` 和 `open-health-agent scheduler status`，并等待一条新的自动同步记录。若 Hermes gateway 没有恢复，重启 gateway；若 scheduler 定义/路径不匹配，先手工同步成功再重新安装 scheduler。
 
 macOS 完全睡眠时不会持续运行小时任务。插电使用可在“系统设置 → 电池 → 选项”开启“显示器关闭时防止在电源适配器供电时自动进入睡眠”，并保持 MacBook 打开。也可以使用本项目可撤销的 AC-only 适配：
 
@@ -519,7 +546,7 @@ Skill 的行为规范可移植，但仓库安装器当前内置的 `--agent` 选
 1. 用宿主自己的标准 Skills 安装方式，或把 Skill 安装到显式目录：
 
    ```bash
-   ./install.sh --skill-dir '/该宿主的/skills/目录' --timezone Asia/Shanghai
+   ./install.sh --skill-dir '/该宿主的/skills/目录' --timezone "$OHA_TIMEZONE"
    ```
 
 2. 验证宿主能读取 `SKILL.md`、私有 `AGENTS.md`，并能执行本地 `open-health-agent` 命令。
