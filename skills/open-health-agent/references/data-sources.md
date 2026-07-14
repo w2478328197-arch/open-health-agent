@@ -107,7 +107,7 @@ A photo requires a vision-capable model or vision tool. Store:
 - confidence and uncertainty note;
 - a local media reference if the user allows retention.
 
-In a dedicated health or diet conversation, a standalone close-up meal photo can default to a consumed-food log when there are no cues that it is a purchase, menu, recipe, unopened product, eating plan, leftover-only image, or background object. Briefly echo the items that will be counted before writing. Ask one targeted question only when identity or consumption is materially ambiguous; do not ask the user to weigh the food. Outside that narrow convention, a photo alone is not proof of consumption. A photo cannot reliably establish every ingredient, cooking oil, portion weight, sodium, or micronutrient; keep missing fields blank and report coverage.
+A standalone meal photo is not proof of consumption by default. In a dedicated health or diet conversation it can become a consumed-food log without repeated confirmation only after the user explicitly adopts that convention and it is saved in private `AGENTS.md`. Even with that opt-in, purchase, menu, recipe, unopened-product, eating-plan, leftover-only, or background-object cues block automatic logging. Briefly echo the items and portion range before writing. Without the saved opt-in, or when identity/context is materially ambiguous, ask one targeted question; do not ask the user to weigh the food. A photo cannot reliably establish every ingredient, cooking oil, portion weight, sodium, or micronutrient; keep missing fields blank and report coverage.
 
 ## Measurements outside Google Health
 
@@ -123,28 +123,30 @@ For an image of a report or device screen:
 
 ## OAuth and scope hygiene
 
-Use only required read scopes from Google's [scope reference](https://developers.google.com/health/scopes). Keep OAuth client JSON, client secrets, authorization URLs and codes, refresh tokens, pending-auth files, and raw responses outside the repository, chat, and ordinary logs.
+Use only required read scopes from Google's [scope reference](https://developers.google.com/health/scopes). OHA's current 14 mapped query families need only `activity_and_fitness.readonly`, `health_metrics_and_measurements.readonly`, and `sleep.readonly`; the upstream `readonly` preset is broader and also includes categories OHA does not import. Keep OAuth client JSON, client secrets, authorization URLs and codes, refresh tokens, pending-auth files, and raw responses outside the repository, chat, and ordinary logs.
 
 This project's pinned `ghealth` flow uses a **Desktop application** OAuth client with loopback/PKCE. First read the instructions emitted by the installed version, then configure it:
 
 ```bash
 ghealth setup --instructions
-ghealth setup --scopes-preset readonly
+ghealth setup --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
 ```
+
+Add the same three full Google Health scopes in Google Cloud under **OAuth consent screen → Data Access → Add or remove scopes**. If the project is in Testing, add the synchronizing account under **Audience → Test users**. The CLI flag limits the local authorization request; it cannot edit the Cloud consent screen.
 
 On a computer with a browser, authenticate and validate with:
 
 ```bash
-ghealth auth login --scopes-preset readonly
+ghealth auth login --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
 ghealth auth status --validate
 ```
 
 For a headless shell, use the same Desktop client and complete the exact flow emitted by `ghealth`:
 
 ```bash
-ghealth auth login --non-interactive --scopes-preset readonly
+ghealth auth login --non-interactive --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
 ghealth auth login --complete '<code>'
 ghealth auth status --validate
 ```
 
-Google's generic [Health API setup page](https://developers.google.com/health/setup) currently describes a **Web Server** OAuth client and a `https://www.google.com` redirect for developers writing direct API clients. Do not use that Web client as a substitute for `ghealth`'s Desktop client: the callback model is different, including in headless mode. OAuth consent screens left in **Testing** may issue refresh tokens that expire after about seven days; distinguish that expiration from an empty health dataset. Treat restricted scopes and production verification as deployment requirements, not optional polish. The [Google Health API data policy](https://developers.google.com/health/policies/health-api-developer-user-data-policy) applies in addition to this project's privacy rules.
+Google's generic [Health API setup page](https://developers.google.com/health/setup) currently describes a **Web Server** OAuth client and a `https://www.google.com` redirect for developers writing direct API clients. Do not use that Web client as a substitute for `ghealth`'s Desktop client: the callback model is different, including in headless mode. OAuth consent screens left in **Testing** may issue refresh tokens that expire after about seven days; distinguish that expiration from an empty health dataset. This project does not send an expiry alert, so during Testing inspect authorization and scheduler status at least weekly and investigate a last-success time older than two configured intervals. Treat restricted scopes and production verification as deployment requirements, not optional polish. The [Google Health API data policy](https://developers.google.com/health/policies/health-api-developer-user-data-policy) applies in addition to this project's privacy rules.

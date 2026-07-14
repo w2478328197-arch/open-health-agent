@@ -131,8 +131,9 @@ The default binary is `~/.local/bin/ghealth`. Open Health Agent also checks that
 2. Connect the manufacturer app to Health Connect on Android or Apple Health on iPhone when supported.
 3. Connect that store to the Google Health app/account and verify that the desired metric appears there.
 4. Run `ghealth setup --instructions` and create the **Desktop application** OAuth client it describes. The generic [Google Health API setup page](https://developers.google.com/health/setup) currently documents a Web Server client for applications that integrate with the API directly; that client and its `https://www.google.com` redirect are not the client flow used by this CLI.
-5. Request only the necessary read scopes listed in the [Google Health scope reference](https://developers.google.com/health/scopes).
-6. Authenticate `ghealth`, run a small manual query, and only then enable automated import.
+5. In the Google Cloud OAuth consent screen, add the required scopes under **Data Access → Add or remove scopes**, and add the synchronizing Google account under **Audience → Test users** while the project is in Testing. Local CLI scope flags do not register scopes in Cloud.
+6. For OHA's 14 mapped query families, request only `activity_and_fitness.readonly`, `health_metrics_and_measurements.readonly`, and `sleep.readonly` from the [Google Health scope reference](https://developers.google.com/health/scopes).
+7. Authenticate `ghealth`, run a small manual query, and only then enable automated import.
 
 ### Configure the Desktop OAuth client
 
@@ -140,27 +141,27 @@ Keep the downloaded client JSON in a private local directory outside the reposit
 
 ```bash
 ghealth setup --instructions
-ghealth setup --scopes-preset readonly
+ghealth setup --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
 ```
 
 On a computer with a usable browser, authenticate with the Desktop client's temporary loopback/PKCE callback:
 
 ```bash
-ghealth auth login --scopes-preset readonly
+ghealth auth login --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
 ghealth auth status --validate
 ```
 
 For a headless shell, use the same **Desktop application** client. Start the non-interactive flow, privately open the emitted URL, then copy only the `code` query parameter from the redirected browser address into the completion command:
 
 ```bash
-ghealth auth login --non-interactive --scopes-preset readonly
+ghealth auth login --non-interactive --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
 ghealth auth login --complete '<code>'
 ghealth auth status --validate
 ```
 
 Follow the URL and completion instructions emitted by the installed `ghealth` version. Never paste the client JSON, client secret, authorization URL, redirect URL, authorization code, refresh token, or command output containing them into chat, logs, or the repository. Do not create a Web application client with a `https://www.google.com` redirect for `ghealth`; Google's generic Web Server instructions apply when writing a direct API client, not when authorizing this CLI.
 
-Google may impose testing-user, verification, restricted-scope, or production-review requirements. In OAuth **Testing** status, a refresh token may expire after about seven days, so test schedules can later become unauthorized and require a new login. Follow the current [Google Health API user-data policy](https://developers.google.com/health/policies/health-api-developer-user-data-policy) and publishing/verification requirements for longer-lived use.
+Google may impose testing-user, verification, restricted-scope, or production-review requirements. In OAuth **Testing** status, a refresh token may expire after about seven days, so test schedules can later become unauthorized and require a new login. This project does not send an authorization-expiry alert: during Testing, inspect `ghealth auth status --validate` and `open-health-agent scheduler status` at least weekly, and investigate when the last successful synchronization is older than two configured intervals. Follow the current [Google Health API user-data policy](https://developers.google.com/health/policies/health-api-developer-user-data-policy) and publishing/verification requirements for longer-lived use.
 
 ### Make both tools use the same local day
 

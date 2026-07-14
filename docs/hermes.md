@@ -96,6 +96,8 @@ hermes gateway setup
 hermes gateway run
 ```
 
+完成前台测试后，在这个终端按 `Ctrl-C` 并确认进程退出，再安装后台服务。同一个 Weixin token 只能由一个 gateway 进程使用。
+
 验证完成后，可在 macOS/Linux 安装后台服务：
 
 ```bash
@@ -108,7 +110,15 @@ Hermes 的 [CLI reference](https://hermes-agent.nousresearch.com/docs/reference/
 
 ### 访问策略
 
-当前 Hermes Weixin 的默认入站 DM 策略是 `open`；个人健康场景不能沿用它。扫码后先在 `~/.hermes/.env` 设置 `WEIXIN_DM_POLICY=pairing` 和 `WEIXIN_GROUP_POLICY=disabled`，前台运行 gateway，只发送一条不敏感消息，并从日志/入站事件取得自己的 user ID。然后改成 `WEIXIN_DM_POLICY=allowlist`、`WEIXIN_ALLOWED_USERS=<自己的 ID>`、`WEIXIN_GROUP_POLICY=disabled`，重启 gateway。**在完成 allowlist 前不要发送任何健康文字、照片或语音。** iLink bot 是独立联系人；allowlist 是入站过滤，不是邀请机制。策略仍为 `open` 时不要发送健康数据，并以安装版本的官方文档复核默认值是否变化。
+当前 Hermes Weixin 的默认入站 DM 策略是 `open`；个人健康场景不能沿用它。扫码后先在 `~/.hermes/.env` 设置 `WEIXIN_DM_POLICY=pairing` 和 `WEIXIN_GROUP_POLICY=disabled`，重启或前台运行 gateway，再从自己的微信只发送一条不敏感测试消息。Hermes 应给出 pairing code；在电脑上执行：
+
+```bash
+hermes pairing list
+hermes pairing approve weixin '<刚才显示的-code>'
+hermes pairing list
+```
+
+批准后再发一条不敏感消息，确认本人能得到正常 Agent 回复。若能用另一个未批准账号测试，它最多应进入 pairing 流程，不能得到 Agent 健康回复。`hermes pairing list` 会显示完整的待批准/已批准身份；普通 Weixin gateway 日志可能会截断 ID，不能从截断日志拼接 `WEIXIN_ALLOWED_USERS`。保持 `pairing` 策略即可只授权已批准用户；若明确改用 `allowlist`，只能复制 pairing 列表中的完整 ID。**批准完成前不要发送任何健康文字、照片或语音。** iLink bot 是独立联系人；pairing/allowlist 都是入站访问控制，不是邀请机制。
 
 微信入站可包含图片、文件、视频和语音。Hermes 会下载/解密媒体供 Agent 处理；当前版本可能缓存于 `~/.hermes/cache/images`、`audio`、`videos`、`documents`。缓存行为随 Hermes 版本和媒体类型变化，不能承诺自动删除，尤其音频/视频可能保留。限制该目录的本机访问权限，按当前版本核查并清理不再需要的媒体。媒体会经过腾讯和本机，也可能发送给已配置模型、STT 或视觉服务商。语音只有在微信提供转写或另有 STT 时才是可用文本。
 
@@ -120,12 +130,14 @@ Hermes 的 [CLI reference](https://hermes-agent.nousresearch.com/docs/reference/
 设备 → 厂商 App → Health Connect/Apple Health → Google Health
 ```
 
-`ghealth` 使用的是 [Google-Health-API/google-health-cli](https://github.com/Google-Health-API/google-health-cli)。先让已安装的版本输出配置说明，再按说明创建自己的 **Desktop application** OAuth client；按[官方 scope 列表](https://developers.google.com/health/scopes)只授权需要的读取项。不要复制别人的 OAuth client secret 或 token。
+`ghealth` 使用的是 [Google-Health-API/google-health-cli](https://github.com/Google-Health-API/google-health-cli)。先让已安装的版本输出配置说明，再按说明创建自己的 **Desktop application** OAuth client。OHA 当前 14 类导入只需要 `activity_and_fitness.readonly`、`health_metrics_and_measurements.readonly` 和 `sleep.readonly`；不要用覆盖 nutrition、profile、settings、location、ECG 和 IRN 的全部只读预设。不要复制别人的 OAuth client secret 或 token。
 
 ```bash
 ghealth setup --instructions
-ghealth setup --scopes-preset readonly
+ghealth setup --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
 ```
+
+在 Google Cloud OAuth consent screen 的 **Data Access → Add or remove scopes** 中也加入这三个完整的 Google Health scope，并在 **Audience** 中把实际同步账号加入 test users（若项目仍为 Testing）。`ghealth --scopes` 只限制本机请求，不会替你修改 Cloud consent screen。
 
 Google 的通用 [Health API OAuth 设置页](https://developers.google.com/health/setup)目前介绍的是开发者自己编写直接 API 客户端时使用的 **Web Server** client 和 `https://www.google.com` redirect。它不是这套 `ghealth` CLI 的授权方式；不要为了 `ghealth` 创建该 Web client，也不要把这两种回调流程混用。
 
@@ -134,7 +146,7 @@ Google 的通用 [Health API OAuth 设置页](https://developers.google.com/heal
 `ghealth` 的 Desktop client 使用临时 loopback/PKCE 回调。在运行账本的电脑执行：
 
 ```bash
-ghealth auth login --scopes-preset readonly
+ghealth auth login --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
 ghealth auth status --validate
 ```
 
@@ -143,14 +155,14 @@ ghealth auth status --validate
 无头环境仍然使用同一个 **Desktop application** client。先启动非交互式流程，在自己的浏览器中私下打开命令输出的地址，再从回跳地址栏只复制 `code` 查询参数交给完成命令：
 
 ```bash
-ghealth auth login --non-interactive --scopes-preset readonly
+ghealth auth login --non-interactive --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
 ghealth auth login --complete '<code>'
 ghealth auth status --validate
 ```
 
 以已安装 `ghealth` 输出的 URL 和完成说明为准。client JSON、client secret、授权 URL、完整 redirect URL、授权 code、refresh token 及包含这些信息的命令输出都只留在私有本机环境，不要发进聊天、日志或仓库。
 
-如果 OAuth consent screen 仍处于 **Testing**，refresh token 可能约 7 天后失效；定时任务随后会变成未授权。开发测试时把重新授权纳入预期，长期使用则按 Google 当前发布、验证和受限 scope 要求处理，而不是把 token 过期误判成没有健康数据。
+如果 OAuth consent screen 仍处于 **Testing**，refresh token 约 7 天后可能失效；定时任务随后会变成未授权。当前项目不会替你发送失效告警：Testing 期间至少每周检查一次 `ghealth auth status --validate` 和 `open-health-agent scheduler status`，且最后成功同步超过两个计划间隔时立即排查。重新授权仍使用上面的三个最小 scope；长期使用则按 Google 当前发布、验证和受限 scope 要求处理，而不是把 token 过期误判成没有健康数据。
 
 把 ghealth 当前活动 profile 的时区显式设成与 Open Health Agent 完全相同的 IANA 名称。例如账本初始化使用了 `--timezone Asia/Shanghai`，则执行：
 

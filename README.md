@@ -128,11 +128,7 @@ python3 --version
 
 系统不必安装 Microsoft Excel 就能生成 `.xlsx`。Excel、Numbers、LibreOffice 或其他兼容应用只用于查看/导出这份视图；不同应用的格式呈现和再次保存可能不同。不要在其中直接改受管健康 sheet，SQLite 始终是真源；复杂工作簿迁移前请另做备份。
 
-本文使用 `Asia/Shanghai` 作为示例，**不是可以照抄的默认值**。继续前先设置下面这个当前终端变量；非上海时区必须替换成自己的 [IANA 时区名称](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)，例如 `Europe/Berlin` 或 `America/New_York`。OHA 初始化、`ghealth config` 和后续所有命令必须使用同一个值；不要使用含义不唯一的 `CST` 等缩写。
-
-```bash
-OHA_TIMEZONE='Asia/Shanghai' # 示例：继续前替换成你的实际 IANA 时区
-```
+本文使用 `Asia/Shanghai` 作为示例，**不是可以照抄的默认值**。先确定自己的 [IANA 时区名称](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)，例如 `Europe/Berlin` 或 `America/New_York`；不要使用含义不唯一的 `CST` 等缩写。因为安装 Hermes 后会重新打开终端，第 3 步会在真正使用前再设置 `OHA_TIMEZONE`。以后每次换新终端运行含该变量的命令，都要先重新设置并确认非空。
 
 ## 从零安装：Hermes + 微信 + Google Health
 
@@ -196,19 +192,23 @@ WEIXIN_DM_POLICY=pairing
 WEIXIN_GROUP_POLICY=disabled
 ```
 
-然后在前台启动，并从自己的微信只发送一条不敏感的测试消息：
+然后在前台启动，并从自己的微信只发送一条不敏感的测试消息。Hermes 应返回 pairing code：
 
 ```bash
 hermes gateway run
 ```
 
-从 gateway 日志或入站事件中取得你自己的 Weixin user ID 后，停止前台服务，把策略收紧为：
+在另一个终端批准这次配对，再确认列表中只有你批准的身份：
 
-```dotenv
-WEIXIN_DM_POLICY=allowlist
-WEIXIN_ALLOWED_USERS=你自己的-Weixin-user-ID
-WEIXIN_GROUP_POLICY=disabled
+```bash
+hermes pairing list
+hermes pairing approve weixin '<刚才显示的-code>'
+hermes pairing list
 ```
+
+批准后再发一条不敏感消息，确认本人能得到正常 Agent 回复。若能用另一个未批准账号测试，它最多应进入 pairing 流程，不能得到 Agent 健康回复。保持 `WEIXIN_DM_POLICY=pairing` 即可只授权已批准用户；如果以后明确改为 `allowlist`，只能从 `hermes pairing list` 复制完整 user ID。普通 Weixin gateway 日志会隐藏或截断 ID，不能拿日志片段拼接 allowlist。
+
+回到运行 `hermes gateway run` 的原终端按 `Ctrl-C`，确认前台 gateway 已退出；同一个 Weixin token 不能同时由前台和后台两个 gateway 使用。
 
 最后安装并检查后台 gateway：
 
@@ -218,13 +218,20 @@ hermes gateway start
 hermes gateway status
 ```
 
-当前 Hermes 的 Weixin 私信默认策略是 `open`；健康场景不要保留默认值。`WEIXIN_ALLOWED_USERS` 是入站过滤器，不是邀请系统。完整说明见 [Hermes Weixin 文档](https://hermes-agent.nousresearch.com/docs/user-guide/messaging/weixin)。若向导报告缺少 `aiohttp` 或 `cryptography`，按该官方页面安装 messaging 依赖后再继续。
+当前 Hermes 的 Weixin 私信默认策略是 `open`；健康场景不要保留默认值。pairing/allowlist 是入站访问控制，不是邀请系统。完整说明见 [Hermes Weixin 文档](https://hermes-agent.nousresearch.com/docs/user-guide/messaging/weixin)和 [Hermes pairing 命令](https://hermes-agent.nousresearch.com/docs/reference/cli-commands#hermes-pairing)。若向导报告缺少 `aiohttp` 或 `cryptography`，按该官方页面安装 messaging 依赖后再继续。
 
 Weixin/iLink Bot 的可用性取决于当前 Hermes 版本、腾讯账号和地区。如果向导没有 Weixin、扫码失败或 iLink 不向该账号开放，不要绕过访问控制；先使用 Hermes CLI 或纯手工账本模式，并按当前官方文档排查。
 
 微信可以接收图片和语音，不代表模型必然能理解它们。无转写的语音可能只是本地缓存的 SILK 文件；无视觉能力的模型也不能识别图片。
 
 ### 3. 安装 Open Health Agent：先选宿主，再选一次工作簿位置
+
+先在当前这个已经重开的终端设置并验证时区；示例值必须替换成你的实际 IANA 时区：
+
+```bash
+OHA_TIMEZONE='Asia/Shanghai'
+test -n "$OHA_TIMEZONE" && printf 'OHA timezone: %s\n' "$OHA_TIMEZONE"
+```
 
 **要在微信里交流，必须安装到 Hermes。** 原因不是 Hermes 的模型一定更强，而是本架构中真正接收 Weixin/iLink 消息的是 Hermes gateway。把 Skill 只装进 Codex，不会让 Codex 自动接管微信。
 
@@ -322,11 +329,11 @@ open-health-agent onboarding mark-explained
 
 纯手工模式可以跳过本节和后面的 `ghealth`、scheduler。
 
-1. 在 iPhone 或 Android 安装并登录 Google Health App；它是手机 App，不是手表 App。
-2. 让设备先同步到厂商 App，例如 Mi Fitness、Garmin Connect、Samsung Health、Oura 或其他厂商 App。
-3. 按设备支持情况，通过 Android Health Connect、iPhone Apple Health，或 Google 支持的直接合作路径连接到同一个 Google Health 账号。
-4. 打开厂商 App 完成一次同步，再打开 Google Health，确认你真正需要的每个指标已经出现。
-5. 如果 HRV、睡眠或训练缺失，先在这一层查权限、地区、系统版本和品牌指标支持；小时任务无法抓取从未进入 Google Health 的数据。
+1. 按 [Google Health App 官方系统要求](https://support.google.com/product-documentation/answer/14226283?hl=zh-Hans)安装并登录：当前要求 Android 11+ 或 iOS 16.4+，还受账号、地区和商店可用性影响。它是手机 App，不是手表 App，也不要把它和旧 Google Fit 或 Android 的 Health Connect 数据桥混为一谈。
+2. 让设备先同步到厂商 App，例如 Mi Fitness、Garmin Connect、Samsung Health、Oura 或其他厂商 App，并在厂商 App/系统健康层只打开你需要的数据类型权限。
+3. Android 通常走“厂商 App → Health Connect → Google Health”，iPhone 通常走“厂商 App → Apple Health → Google Health”；少数合作设备可直连。Google Health 内打开 **Connections → Partner apps / Apps and services**，按 [Google 官方第三方连接步骤](https://support.google.com/googlehealth/answer/14236613?hl=zh-Hans)完成连接。
+4. 打开厂商 App 完成一次同步，再到 Google Health 的 **Connections → Connected** 确认连接，并逐项确认你真正需要的步数、睡眠、训练、HRV 等指标已经出现。
+5. 如果指标缺失，按“设备 → 厂商 App → Health Connect/Apple Health → Google Health”逐跳排查权限、同步时间、地区、系统版本和品牌支持；小时任务无法抓取从未进入 Google Health 的数据。
 
 ### 5. 安装并授权 ghealth
 
@@ -340,28 +347,34 @@ export PATH="$HOME/.local/bin:$PATH"
 ghealth setup --instructions
 ```
 
-按照 `ghealth` 自己输出的步骤，在 Google Cloud 中启用 Google Health API，并创建 OAuth client ID。这里必须选择 **Desktop application**，下载 client secret JSON 后运行：
+按照 `ghealth` 自己输出的步骤，在 Google Cloud 中启用 Google Health API，并创建 OAuth client ID。这里必须选择 **Desktop application**。在 OAuth consent screen 的 **Data Access → Add or remove scopes** 中加入以下三项，并在项目仍为 Testing 时到 **Audience → Test users** 加入实际同步 Google Health 的账号：
+
+- `https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly`
+- `https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly`
+- `https://www.googleapis.com/auth/googlehealth.sleep.readonly`
+
+这是 OHA 当前 14 类导入实际需要的最小范围；上游 `readonly` 预设还会请求 OHA 不导入的 nutrition、profile、settings、location、ECG 和 IRN。下载 client secret JSON 后运行：
 
 ```bash
-ghealth setup --scopes-preset readonly
+ghealth setup --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
 ghealth auth status --validate
 ghealth config set timezone "$OHA_TIMEZONE"
 ```
 
-`ghealth setup` 会使用本机 loopback + PKCE 完成浏览器授权。Google 的通用 API 设置页还介绍了 **Web Server** client 和 `https://www.google.com` redirect URI；那是直接编写 API 客户端的流程，不能拿来替代这个 CLI 所需的 Desktop client。
+`ghealth setup` 会使用本机 loopback + PKCE 完成浏览器授权。`--scopes` 只限制本机授权请求，不会替你修改 Google Cloud 的 Data Access。Google 的通用 API 设置页还介绍了 **Web Server** client 和 `https://www.google.com` redirect URI；那是直接编写 API 客户端的流程，不能拿来替代这个 CLI 所需的 Desktop client。
 
-若 OAuth consent screen 处于 Testing，要把实际同步 Google Health 的同一账号加入 test users。账号、地区或项目若无法启用 Google Health API，完整可穿戴模式就不能继续；这时仍可使用微信/CLI 手工记录模式。
+账号、地区或项目若无法启用 Google Health API，完整可穿戴模式就不能继续；这时仍可使用微信/CLI 手工记录模式。
 
 无图形浏览器的电脑仍然使用同一个 Desktop client：
 
 ```bash
-ghealth auth login --non-interactive --scopes-preset readonly
+ghealth auth login --non-interactive --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
 # 在自己的浏览器打开 auth_url，从回跳地址栏只复制 code 查询参数：
 ghealth auth login --complete '<code>'
 ghealth auth status --validate
 ```
 
-`ghealth` 会把 client 和明文 token 保存在 `~/.config/ghealth/`，上游会将文件权限设为仅当前用户可读写。完成并验证后可删除 Downloads 中多余的 client JSON 副本，但不要删除 `ghealth` 管理的配置目录。不要把 client secret、授权 URL、code、token 或完整配置输出发到聊天、Issue 或 Git。Google consent screen 若仍处于 Testing，refresh token 可能较快过期；这和“账号里没有健康数据”是两种不同问题。失效时重新运行 `ghealth auth login --scopes-preset readonly`，再执行 `auth status --validate`、手动 `sync` 和 scheduler 检查。
+`ghealth` 会把 client 和明文 token 保存在 `~/.config/ghealth/`，上游会将文件权限设为仅当前用户可读写。完成并验证后可删除 Downloads 中多余的 client JSON 副本，但不要删除 `ghealth` 管理的配置目录。不要把 client secret、授权 URL、code、token 或完整配置输出发到聊天、Issue 或 Git。Google consent screen 若仍处于 Testing，refresh token 约 7 天后可能失效；这和“账号里没有健康数据”是两种不同问题。失效时用上面的三个最小 scope 重新运行 `ghealth auth login --scopes ...`，再执行 `auth status --validate`、手动 `sync` 和 scheduler 检查。
 
 先做一条最近两天的步数小查询；`--to` 在当前锁定版本中包含指定日期：
 
@@ -415,6 +428,8 @@ Hermes gateway 和健康 scheduler 是两个不同的后台服务：
 
 macOS 的 launchd 和 Linux 的 systemd user timer 都属于安装它们的用户。macOS 用户级任务通常只有在该用户登录后才运行；操作系统重启后先登录，再检查 `hermes gateway status` 和 `open-health-agent scheduler status`，并等待一条新的自动同步记录。若 Hermes gateway 没有恢复，重启 gateway；若 scheduler 定义/路径不匹配，先手工同步成功再重新安装 scheduler。
 
+当前版本不会主动发送 OAuth 过期告警。Google Cloud 仍为 Testing 时，至少每周运行一次 `ghealth auth status --validate` 和 `open-health-agent scheduler status`；最后成功同步时间超过两个计划间隔（小时任务即约 2 小时）就要排查，而不是等几天后才发现档案停更。
+
 macOS 完全睡眠时不会持续运行小时任务。插电使用可在“系统设置 → 电池 → 选项”开启“显示器关闭时防止在电源适配器供电时自动进入睡眠”，并保持 MacBook 打开。也可以使用本项目可撤销的 AC-only 适配：
 
 ```bash
@@ -446,9 +461,7 @@ Linux 使用 systemd user timer；退出登录后是否继续运行取决于 use
 
 如果微信里的 Hermes 报找不到 `open-health-agent`，让它改用安装器打印的完整 `Command:` 前缀（默认可执行文件是 `~/.local/bin/open-health-agent`），然后重启 gateway 再测试。只有微信端实际完成一次写入和 context 读取，才说明后台 Hermes 的命令环境正确。
 
-在专用健康/饮食对话里，本项目采用参考 Hermes 工作流中的简化约定：**单独发送一张近距离餐食照片，且没有购物、菜单、未开封包装、计划或背景物线索时，默认表示“把这次实际摄入记下来”**，无需再问“要不要记录”，也不要求用户称重。Agent 仍须先读图、回显识别到的摄入项目、估算中心值和范围；食物身份真正不清楚时只问一个短问题。购物车、菜单、菜谱、价格标签、未开封食物和背景物不能算作已吃。
-
-如果不想采用这条约定，每次配图写“我吃了这个”即可；也可以在私有 `AGENTS.md` 里明确改成“每张照片先确认”。
+开源项目的安全默认是：**单独一张照片不自动证明已经吃下**。第一次请配图写“我吃了这个”，或明确说一次“以后在这个专用健康对话里，单独发近距离餐食图就表示已经摄入并请记录”。Agent 把这个选择写入私有 `AGENTS.md` 后，才可省略重复确认；仍须先回显识别项目、份量区间和置信度。购物车、菜单、菜谱、价格标签、未开封食物、未来计划和背景物永远不能算作已吃，身份真正不清楚时只问一个必要的短问题。
 
 ## 这个 Skill 强制 Agent 遵守什么
 

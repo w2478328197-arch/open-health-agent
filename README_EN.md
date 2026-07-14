@@ -146,11 +146,7 @@ On a clean Mac, run `xcode-select --install` first, wait for Command Line Tools 
 
 Microsoft Excel is not required to generate `.xlsx`. Excel, Numbers, LibreOffice, or another compatible application is only a viewer/export surface; rendering and round-tripping may differ between applications. Do not directly edit managed health sheets in any of them. SQLite remains the source of truth, and complex workbooks should be backed up before migration.
 
-This guide uses `Asia/Shanghai` as an example, **not a copy-paste default**. Set the shell variable below before continuing. Replace it with your actual [IANA timezone](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones), such as `Europe/Berlin` or `America/New_York`, unless Shanghai time is correct for you. OHA initialization, `ghealth config`, and every later command must use the same value. Do not use ambiguous abbreviations such as `CST`.
-
-```bash
-OHA_TIMEZONE='Asia/Shanghai' # Example: replace this with your actual IANA timezone
-```
+This guide uses `Asia/Shanghai` as an example, **not a copy-paste default**. First determine your real [IANA timezone](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones), such as `Europe/Berlin` or `America/New_York`; do not use ambiguous abbreviations such as `CST`. Because the Hermes step requires reopening the terminal, Step 3 sets `OHA_TIMEZONE` again immediately before it is used. Whenever you open another terminal later, re-establish the variable and verify that it is non-empty before running a command that references it.
 
 ## Where should the Skill be installed?
 
@@ -160,13 +156,7 @@ Install the Skill into the Agent host that actually receives the user's messages
 - **Installing into Codex is optional.** It lets Codex maintain the project or use the same private ledger as another local host. It does not give Codex control of Hermes's Weixin gateway and cannot replace the Hermes installation for WeChat.
 - WorkBuddy, Antigravity, Claude, or another host needs its own Skill installation only if that host will invoke the Skill. Its image, speech, local-command, and messaging capabilities must be tested independently.
 
-For WeChat only, install with `--agent hermes`. To make the same Skill available in both Hermes and Codex, repeat the option in the **same** installer run:
-
-```bash
-./install.sh --agent hermes --agent codex --timezone "$OHA_TIMEZONE"
-```
-
-Both hosts use the same private ledger by default. Do not create two independent SQLite writers or two schedulers.
+For WeChat only, select `--agent hermes`. To make the same Skill available in both Hermes and Codex, repeat the option in the **same** installer run after cloning the repository in Step 3. Both hosts use the same private ledger by default; do not create two independent SQLite writers or two schedulers.
 
 ## From zero to running: Hermes + WeChat + Google Health
 
@@ -230,19 +220,23 @@ WEIXIN_DM_POLICY=pairing
 WEIXIN_GROUP_POLICY=disabled
 ```
 
-Start the gateway in the foreground and send only one non-sensitive test message from your own WeChat account:
+Start the gateway in the foreground and send only one non-sensitive test message from your own WeChat account. Hermes should return a pairing code:
 
 ```bash
 hermes gateway run
 ```
 
-Read your own Weixin user ID from the gateway log or inbound event. Stop the foreground service, then tighten the policy:
+In another terminal, approve that pairing and confirm that only the identity you approved appears:
 
-```dotenv
-WEIXIN_DM_POLICY=allowlist
-WEIXIN_ALLOWED_USERS=your-own-Weixin-user-ID
-WEIXIN_GROUP_POLICY=disabled
+```bash
+hermes pairing list
+hermes pairing approve weixin '<code-shown-by-Hermes>'
+hermes pairing list
 ```
+
+Send a second non-sensitive message and confirm that your account gets a normal Agent response. If a second unapproved account is available for a negative test, it may enter the pairing flow but must not receive an Agent health response. Leaving `WEIXIN_DM_POLICY=pairing` authorizes only approved users. If you deliberately switch to `allowlist` later, copy the full user ID only from `hermes pairing list`; ordinary Weixin gateway logs redact or truncate IDs and cannot be used to reconstruct an allowlist.
+
+Return to the original terminal running `hermes gateway run`, press `Ctrl-C`, and confirm that the foreground gateway has exited. The same Weixin token cannot be used by foreground and background gateway processes at the same time.
 
 Install and check the background gateway:
 
@@ -252,13 +246,20 @@ hermes gateway start
 hermes gateway status
 ```
 
-The current Hermes Weixin default for direct messages is `open`; do not leave that default in place for health use. `WEIXIN_ALLOWED_USERS` is an inbound filter, not an invitation system. See the complete [Hermes Weixin documentation](https://hermes-agent.nousresearch.com/docs/user-guide/messaging/weixin). If the wizard reports missing `aiohttp` or `cryptography`, install the messaging dependencies described on that official page and retry.
+The current Hermes Weixin default for direct messages is `open`; do not leave that default in place for health use. Pairing and allowlists are inbound access controls, not invitation systems. See the complete [Hermes Weixin documentation](https://hermes-agent.nousresearch.com/docs/user-guide/messaging/weixin) and [Hermes pairing commands](https://hermes-agent.nousresearch.com/docs/reference/cli-commands#hermes-pairing). If the wizard reports missing `aiohttp` or `cryptography`, install the messaging dependencies described on that official page and retry.
 
 Weixin/iLink availability depends on the current Hermes version, Tencent account, and region. If Weixin is absent from the wizard, QR login fails, or iLink is unavailable to the account, do not bypass access controls. Use Hermes CLI or the manual ledger mode while troubleshooting against current official documentation.
 
 WeChat may deliver an image or voice file without the model being able to understand it. On the locally verified Hermes v0.18.0 path, an iLink-provided transcript is usable, but an inbound voice message without that transcript may be only a cached `audio/silk/*.silk` file. The built-in transcription format gate does not accept SILK and rejects it before STT. Ask for text unless an explicit conversion/custom-STT path has been configured and tested. A text-only model cannot inspect an image.
 
 ### 3. Install Open Health Agent: choose one path and run it once
+
+Set and verify the timezone in this newly reopened terminal. Replace the example with your actual IANA timezone:
+
+```bash
+OHA_TIMEZONE='Asia/Shanghai'
+test -n "$OHA_TIMEZONE" && printf 'OHA timezone: %s\n' "$OHA_TIMEZONE"
+```
 
 OHA does not recommend a `curl | bash` installation. Prefer cloning the repository, inspecting the exact revision, and running the local installer from that revision:
 
@@ -345,11 +346,11 @@ This timestamp is installation audit information. It never allows the Agent to s
 
 Manual-only mode can skip this section, `ghealth`, and the scheduler.
 
-1. Install and sign into the Google Health App on iPhone or Android. It is a phone app, not a watch app.
-2. Let the device synchronize into its manufacturer app, such as Mi Fitness, Garmin Connect, Samsung Health, Oura, or another supported app.
-3. According to the device's supported route, connect through Android Health Connect, iPhone Apple Health, or a Google-supported direct partner path to the same Google Health account.
-4. Trigger one synchronization in the manufacturer app, then open Google Health and confirm that every metric you actually need is visible.
-5. If HRV, sleep, or exercise is missing, investigate permission, region, system version, and brand-level metric support at this layer. An hourly job cannot fetch data that never reached Google Health.
+1. Install and sign into the Google Health App according to its [official setup requirements](https://support.google.com/product-documentation/answer/14226283?hl=en): it currently requires Android 11+ or iOS 16.4+, subject to account, region, and store availability. It is a phone app, not a watch app; do not confuse it with legacy Google Fit or the Android Health Connect data bridge.
+2. Let the device synchronize into its manufacturer app, such as Mi Fitness, Garmin Connect, Samsung Health, Oura, or another supported app. In the manufacturer/system-health layer, enable only the data-type permissions you need.
+3. Android commonly follows “manufacturer app → Health Connect → Google Health”; iPhone commonly follows “manufacturer app → Apple Health → Google Health.” Some partners connect directly. In Google Health, open **Connections → Partner apps / Apps and services** and follow Google's [official third-party connection steps](https://support.google.com/googlehealth/answer/14236613?hl=en).
+4. Trigger one manufacturer synchronization, then confirm the connection under Google Health **Connections → Connected** and verify each target metric—steps, sleep, exercise, HRV, and so on—rather than only the app name.
+5. If a metric is missing, inspect each hop—device → manufacturer app → Health Connect/Apple Health → Google Health—for permission, synchronization time, region, system version, and brand support. An hourly job cannot fetch data that never reached Google Health.
 
 ### 5. Install and authorize `ghealth`
 
@@ -363,22 +364,28 @@ export PATH="$HOME/.local/bin:$PATH"
 ghealth setup --instructions
 ```
 
-Follow the instructions emitted by `ghealth`, enable the Google Health API in Google Cloud, and create an OAuth client ID. For this CLI, choose **Desktop application**. Download the client-secret JSON, then run:
+Follow the instructions emitted by `ghealth`, enable the Google Health API in Google Cloud, and create an OAuth client ID. For this CLI, choose **Desktop application**. Under the OAuth consent screen, use **Data Access → Add or remove scopes** to add these three scopes; while the project is in Testing, also add the actual synchronizing account under **Audience → Test users**:
+
+- `https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly`
+- `https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly`
+- `https://www.googleapis.com/auth/googlehealth.sleep.readonly`
+
+These are the minimum scopes for OHA's current 14 mapped imports. Upstream's broad `readonly` preset also asks for nutrition, profile, settings, location, ECG, and IRN categories that OHA does not import. Download the client-secret JSON, then run:
 
 ```bash
-ghealth setup --scopes-preset readonly
+ghealth setup --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
 ghealth auth status --validate
 ghealth config set timezone "$OHA_TIMEZONE"
 ```
 
-`ghealth setup` uses a local loopback callback with PKCE for browser authorization. Google's generic API setup page also describes a **Web Server** client and a `https://www.google.com` redirect URI for developers writing their own API client. That is a different flow and must not replace the Desktop client required by this CLI.
+`ghealth setup` uses a local loopback callback with PKCE for browser authorization. The `--scopes` flag limits the local request; it cannot edit Google Cloud Data Access for you. Google's generic API setup page also describes a **Web Server** client and a `https://www.google.com` redirect URI for developers writing their own API client. That is a different flow and must not replace the Desktop client required by this CLI.
 
-If the OAuth consent screen is in Testing, add the same Google account that synchronizes Google Health as a test user. If the account, region, or project cannot enable the Google Health API, full wearable mode cannot continue; WeChat/CLI manual logging still works.
+If the account, region, or project cannot enable the Google Health API, full wearable mode cannot continue; WeChat/CLI manual logging still works.
 
 A computer without a graphical browser still uses the same Desktop client:
 
 ```bash
-ghealth auth login --non-interactive --scopes-preset readonly
+ghealth auth login --non-interactive --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
 # Open auth_url privately in your own browser. Copy only the code query parameter:
 ghealth auth login --complete '<code>'
 ghealth auth status --validate
@@ -386,7 +393,7 @@ ghealth auth status --validate
 
 `ghealth` stores its client and plaintext token under `~/.config/ghealth/`; upstream sets owner-only file permissions. After successful validation, you may delete redundant copies of the client JSON from Downloads, but do not delete the managed `ghealth` configuration directory. Never paste a client secret, authorization URL, code, token, or complete configuration output into chat, an Issue, or Git.
 
-When the Google consent screen remains in Testing, a refresh token may expire relatively quickly. That is an authorization failure, not evidence that the account has no health data. Re-run `ghealth auth login --scopes-preset readonly`, followed by `auth status --validate`, a manual `sync`, and a scheduler check.
+When the Google consent screen remains in Testing, a refresh token may expire after about seven days. That is an authorization failure, not evidence that the account has no health data. Re-run `ghealth auth login --scopes ...` with the same three minimum scopes, followed by `auth status --validate`, a manual `sync`, and a scheduler check.
 
 Run a small step query for the last two dates. In the pinned version, `--to` includes the named date:
 
@@ -440,6 +447,8 @@ This is an approximately every-3600-seconds schedule, not a promise to run exact
 
 macOS launchd and the Linux systemd user timer belong to the user who installed them. A macOS user job normally runs only after that user signs in. After an operating-system reboot, sign in, check both `hermes gateway status` and `open-health-agent scheduler status`, and wait for a new automatic-sync record. Restart the Hermes gateway if it did not recover. If the scheduler definition or absolute paths no longer match, complete a manual sync and reinstall the scheduler.
 
+This version does not send an OAuth-expiry alert. While Google Cloud remains in Testing, run `ghealth auth status --validate` and `open-health-agent scheduler status` at least weekly. Investigate whenever the last successful synchronization is older than two configured intervals—about two hours for the hourly schedule—instead of discovering a stale ledger days later.
+
 A fully sleeping Mac will not continuously execute hourly jobs. When plugged in, go to **System Settings → Battery → Options** and enable the option that prevents automatic sleep on the power adapter while the display is off, and keep a MacBook open. Or use the project's reversible AC-only helper:
 
 ```bash
@@ -471,9 +480,7 @@ Run these steps in order before calling the system fully usable:
 
 If Hermes in WeChat cannot find `open-health-agent`, tell it to use the complete `Command:` prefix printed by the installer—the default executable is `~/.local/bin/open-health-agent`—then restart the gateway and retry. The background command environment is proven only after WeChat completes one real write and one context read.
 
-In a dedicated health or food conversation, this project adopts a simplified convention from the reference Hermes workflow: **a single close-up meal photo, with no evidence of shopping, a menu, unopened packaging, a future plan, or background food, means “log this actual intake” by default**. The Agent need not ask “should I log this?” or require weighing. It must still inspect the image, echo the recognized intake, and provide a central estimate and range. If food identity is truly unclear, ask one short question. A shopping cart, menu, recipe, price label, unopened item, or background object must never be logged as consumed.
-
-If you do not want this convention, include “I ate this” with each image, or set “ask before logging every photo” in the private `AGENTS.md`.
+The safe open-source default is that **a bare photo does not by itself prove consumption**. Initially include “I ate this,” or explicitly say once, “In this dedicated health conversation, a close-up meal photo by itself means I consumed it and want it logged.” Only after that choice is saved in the private `AGENTS.md` may the Agent omit repeated confirmation. It must still echo the recognized items, portion range, and confidence first. A shopping cart, menu, recipe, price label, unopened item, future plan, or background object must never be logged as consumed; if identity is genuinely unclear, ask one necessary short question.
 
 ## What the Skill requires every Agent to do
 
