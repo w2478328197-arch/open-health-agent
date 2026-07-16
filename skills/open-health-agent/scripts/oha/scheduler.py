@@ -22,6 +22,7 @@ from .config import Config, save_config
 
 SYNC_LABEL = "io.github.open-health-agent.sync"
 AWAKE_LABEL = "io.github.open-health-agent.keep-awake-on-ac"
+_FILESYSTEM_GETUID = getattr(os, "getuid", None)
 PROXY_ENV_KEYS = (
     "HTTP_PROXY",
     "HTTPS_PROXY",
@@ -45,6 +46,15 @@ SAFE_RUNTIME_ENVIRONMENT = {
     "DYLD_LIBRARY_PATH": "",
     "DYLD_FRAMEWORK_PATH": "",
 }
+
+
+def _filesystem_uid() -> int | None:
+    if _FILESYSTEM_GETUID is None:
+        return None
+    try:
+        return _FILESYSTEM_GETUID()
+    except OSError:
+        return None
 
 
 def validate_proxy_environment(values: dict[str, str]) -> dict[str, str]:
@@ -117,7 +127,8 @@ def proxy_environment_from_file(path: Path) -> dict[str, str]:
     if os.name != "nt":
         if metadata.st_mode & 0o077:
             raise PermissionError("scheduler proxy environment file must be owner-only")
-        if hasattr(os, "getuid") and metadata.st_uid != os.getuid():
+        filesystem_uid = _filesystem_uid()
+        if filesystem_uid is not None and metadata.st_uid != filesystem_uid:
             raise PermissionError("scheduler proxy environment file must be owned by the current user")
     values: dict[str, str] = {}
     for raw_line in selected.read_text(encoding="utf-8").splitlines():
@@ -318,7 +329,7 @@ def _private_log_directory(metadata: os.stat_result) -> bool:
         not metadata.st_mode & 0o077
         and metadata.st_mode & stat.S_IWUSR
         and metadata.st_mode & stat.S_IXUSR
-        and (not hasattr(os, "getuid") or metadata.st_uid == os.getuid())
+        and (_filesystem_uid() is None or metadata.st_uid == _filesystem_uid())
     )
 
 
@@ -330,7 +341,7 @@ def _private_log_file(metadata: os.stat_result) -> bool:
     return bool(
         not metadata.st_mode & 0o077
         and metadata.st_mode & stat.S_IWUSR
-        and (not hasattr(os, "getuid") or metadata.st_uid == os.getuid())
+        and (_filesystem_uid() is None or metadata.st_uid == _filesystem_uid())
     )
 
 
@@ -1699,7 +1710,8 @@ def _owner_only_regular_file(path: Path) -> bool:
         return False
     if metadata.st_mode & 0o077:
         return False
-    return not hasattr(os, "getuid") or metadata.st_uid == os.getuid()
+    filesystem_uid = _filesystem_uid()
+    return filesystem_uid is None or metadata.st_uid == filesystem_uid
 
 
 def _proxy_definition_status(environment: Any) -> tuple[list[str], bool]:

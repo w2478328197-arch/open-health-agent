@@ -209,11 +209,12 @@ def test_linux_scheduler_definition_status_and_uninstall(
     service = Path(installed["service"])
     timer = Path(installed["timer"])
     assert service.exists() and timer.exists()
-    assert str(private_home.resolve()) in service.read_text(encoding="utf-8")
-    assert "/opt/oha/health_agent.py" in service.read_text(encoding="utf-8")
-    assert "--scheduled" in service.read_text(encoding="utf-8")
-    assert "Environment=GHEALTH_PROFILE=default" in service.read_text(encoding="utf-8")
-    assert "Environment=GHEALTH_FORMAT=json" in service.read_text(encoding="utf-8")
+    service_text = service.read_text(encoding="utf-8")
+    assert scheduler._systemd_escape_argument(str(private_home.resolve())) in service_text
+    assert scheduler._systemd_escape_argument("/opt/oha/health_agent.py") in service_text
+    assert "--scheduled" in service_text
+    assert "Environment=GHEALTH_PROFILE=default" in service_text
+    assert "Environment=GHEALTH_FORMAT=json" in service_text
     assert "Environment=HTTPS_PROXY=http://127.0.0.1:7890" in service.read_text(
         encoding="utf-8"
     )

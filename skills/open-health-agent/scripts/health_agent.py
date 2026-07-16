@@ -461,12 +461,15 @@ def _backup_database(config, database: HealthDatabase, label: str) -> Path | Non
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     destination = directory / f"health-ledger-db-{stamp}-{safe_label}-{uuid.uuid4().hex[:8]}.sqlite3"
     temporary = destination.with_name(f".{destination.name}.tmp")
+    backup_connection = sqlite3.connect(temporary)
     try:
-        with sqlite3.connect(temporary) as backup_connection:
+        try:
             database.connection.backup(backup_connection)
             integrity = backup_connection.execute("PRAGMA quick_check").fetchone()[0]
             if integrity != "ok":
                 raise sqlite3.DatabaseError("SQLite backup integrity check failed")
+        finally:
+            backup_connection.close()
         try:
             temporary.chmod(0o600)
         except OSError:
@@ -672,10 +675,11 @@ def _cap_scheduler_logs(config, maximum_bytes: int = 2 * 1024 * 1024) -> None:
                 continue
             if opened.st_size > maximum_bytes:
                 os.ftruncate(descriptor, 0)
-            try:
-                os.fchmod(descriptor, 0o600)
-            except OSError:
-                pass
+            if hasattr(os, "fchmod"):
+                try:
+                    os.fchmod(descriptor, 0o600)
+                except OSError:
+                    pass
         except FileNotFoundError:
             continue
         except OSError:

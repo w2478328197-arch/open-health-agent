@@ -530,6 +530,7 @@ def export_workbook(config: Config, database: HealthDatabase, template: Path) ->
             workbook.calculation.fullCalcOnLoad = True
             workbook.calculation.forceFullCalc = True
             workbook.save(temp)
+            os.chmod(temp, 0o600)
         finally:
             workbook.close()
 
@@ -562,6 +563,7 @@ def export_workbook(config: Config, database: HealthDatabase, template: Path) ->
                 os.fsync(handle.fileno())
             except OSError:
                 pass
+        os.chmod(temp, 0o600)
         os.replace(temp, destination)
         try:
             os.chmod(destination, 0o600)
