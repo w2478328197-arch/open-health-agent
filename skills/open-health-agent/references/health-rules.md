@@ -2,6 +2,18 @@
 
 This reference defines calculation and decision rules for wellness/fitness coaching. It does not authorize diagnosis, treatment, medication changes, or emergency triage beyond directing the user to appropriate care.
 
+## Contents
+
+- [Decision hierarchy](#decision-hierarchy)
+- [Resting energy estimate](#resting-energy-estimate)
+- [Activity and total energy](#activity-and-total-energy)
+- [Thermic effect of food](#thermic-effect-of-food)
+- [Nutrition recap](#nutrition-recap)
+- [Training-day adaptation](#training-day-adaptation)
+- [WHO cold-start baseline](#who-cold-start-baseline)
+- [Blood pressure and urgent safety](#blood-pressure-and-urgent-safety)
+- [Language and precision](#language-and-precision)
+
 ## Decision hierarchy
 
 Apply this order before advice:

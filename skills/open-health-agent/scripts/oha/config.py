@@ -72,6 +72,18 @@ def atomic_write_json(path: Path, value: Any, mode: int = 0o600) -> None:
             os.fsync(handle.fileno())
         os.chmod(temp, mode)
         os.replace(temp, path)
+        if os.name != "nt":
+            try:
+                directory_descriptor = os.open(path.parent, os.O_RDONLY)
+                try:
+                    os.fsync(directory_descriptor)
+                finally:
+                    os.close(directory_descriptor)
+            except OSError:
+                # Some synchronized/network filesystems do not support
+                # directory fsync. The file itself is already durable; retain
+                # portable best-effort behavior while strengthening local FS.
+                pass
     finally:
         if temp.exists():
             temp.unlink()

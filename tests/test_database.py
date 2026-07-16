@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+import oha.database as database_module
 from oha.database import HealthDatabase, stable_record_id
 
 
@@ -91,6 +94,38 @@ def test_sync_run_status_round_trip(tmp_path: Path) -> None:
         assert run["status"] == "partial"
         assert run["daily_count"] == 2
         assert run["errors"] == ["synthetic gap"]
+
+
+def test_same_second_sync_runs_use_insertion_order_for_latest_and_retention(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        database_module,
+        "utc_now",
+        lambda: "2026-01-02T03:04:05+00:00",
+    )
+    batches = ["z-oldest", "y-older", "b-newer", "a-newest"]
+
+    with HealthDatabase(tmp_path / "health.sqlite3") as database:
+        for batch_id in batches:
+            database.begin_sync(batch_id, "2026-01-01", "2026-01-02")
+            database.finish_sync(batch_id, "success", 1, 0, 0, "2026-01-02", [])
+
+        schema = database.connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='sync_runs'"
+        ).fetchone()[0]
+        assert "WITHOUT ROWID" not in schema.upper()
+        assert [run["batch_id"] for run in database.list_sync_runs()] == list(
+            reversed(batches)
+        )
+
+        database.prune_history(audit_limit=1, sync_limit=2)
+
+        assert [run["batch_id"] for run in database.list_sync_runs()] == [
+            "a-newest",
+            "b-newer",
+        ]
 
 
 def test_history_retention_is_bounded(tmp_path: Path) -> None:

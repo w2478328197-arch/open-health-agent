@@ -1,5 +1,7 @@
 # Privacy
 
+[English](PRIVACY.md) · [简体中文](PRIVACY.zh-CN.md) · [Project home](README_EN.md)
+
 Open Health Agent is local-first: the canonical SQLite ledger, private goals, configuration, context, backups, and Excel view are created under a user-controlled local data directory. The repository does not operate a hosted health-data service.
 
 Local-first does **not** mean all upstream processing is local. Depending on what the user enables:
@@ -48,6 +50,12 @@ The user controls the local data directory and may:
 Deleting this repository does not delete data held by external providers. Deleting the data home does not revoke OAuth tokens stored by another application. Both actions may be required.
 
 Hermes versions may download message media under `~/.hermes/cache/images`, `audio`, `videos`, and `documents`. Retention is version- and media-type-dependent; this project does not promise automatic deletion, and audio/video may remain. Keep the host cache owner-only where possible, inspect the installed version's behavior, and remove media no longer needed. Provider-side copies require the provider's own deletion controls.
+
+## Images, voice, and auxiliary models
+
+A successfully delivered WeChat image or voice message does not prove that the selected main model can understand it. An image may be processed by the main vision model; when the main endpoint is text-only, such as the current direct DeepSeek chat API, Hermes may instead send it to a separately configured auxiliary vision model and pass the resulting description to the main model. Voice transcription may likewise use a separate speech-to-text service. Before enabling either route, identify the actual provider: one message can cross more than one model service.
+
+Food-photo estimates, instrument readings, and speech transcripts can all be wrong. Retain provenance, confidence, and uncertainty, and do not use these estimates for diagnostic imaging, medical conclusions, or other high-risk decisions.
 
 ## Sharing and publication
 

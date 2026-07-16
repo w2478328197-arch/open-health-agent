@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from datetime import date, datetime
 from typing import Any
 
@@ -51,11 +52,42 @@ def _validate_time(value: Any, label: str) -> str:
     try:
         datetime.fromisoformat(candidate)
     except ValueError:
-        try:
-            datetime.strptime(result, "%H:%M")
-        except ValueError as exc:
-            raise ValueError(f"{label} must be HH:MM or ISO 8601") from exc
+        for time_format in ("%H:%M", "%H:%M:%S"):
+            try:
+                parsed = datetime.strptime(result, time_format)
+                return parsed.strftime("%H:%M:%S") if time_format == "%H:%M:%S" else result
+            except ValueError:
+                continue
+        raise ValueError(f"{label} must be HH:MM, HH:MM:SS, or ISO 8601")
     return result
+
+
+def _entry_method(payload: dict[str, Any], default: str = "manual") -> str:
+    """Accept the schema name and common agent-facing alias without ambiguity."""
+
+    method = _text(payload.get("method"), "method")
+    alias = _text(payload.get("entry_method"), "entry_method")
+    if method and alias and method != alias:
+        raise ValueError("method and entry_method must match when both are supplied")
+    return method or alias or default
+
+
+def _source_event_id(payload: dict[str, Any]) -> str:
+    value = _text(payload.get("source_event_id"), "source_event_id")
+    if len(value) > 512:
+        raise ValueError("source_event_id must be at most 512 characters")
+    return value
+
+
+def _source_event_item_id(payload: dict[str, Any], source_event_id: str) -> str:
+    value = _text(payload.get("source_event_item_id"), "source_event_item_id")
+    if not value:
+        return ""
+    if not source_event_id:
+        raise ValueError("source_event_item_id requires source_event_id")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", value):
+        raise ValueError("source_event_item_id must be an opaque item key of at most 128 safe characters")
+    return value
 
 
 def _clean_original_text(payload: dict[str, Any]) -> str:
@@ -82,12 +114,21 @@ def _normalize_measurement(payload: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("blood pressure values are outside the supported validation range")
     timestamp = _validate_time(payload.get("time"), "time")
     source = _text(payload.get("source") or "user", "source", required=True)
-    method = _text(payload.get("method") or "manual", "method", required=True)
+    method = _entry_method(payload)
+    source_event_id = _source_event_id(payload)
+    source_event_item_id = _source_event_item_id(payload, source_event_id)
     original_text = _clean_original_text(payload)
+    if source_event_item_id:
+        identity = [source, method, source_event_id, source_event_item_id]
+    elif source_event_id:
+        identity = [source, method, source_event_id, metric]
+    else:
+        identity = [day, timestamp, metric, unit, source, method, original_text]
     record_id = _text(payload.get("record_id"), "record_id") or stable_record_id(
         # Keep the source event identity independent of a corrected reading so
         # a re-parse updates the same row instead of creating a contradiction.
-        "measurement", [day, timestamp, metric, unit, source, original_text]
+        "measurement",
+        identity,
     )
     return {
         "record_id": record_id,
@@ -99,6 +140,8 @@ def _normalize_measurement(payload: dict[str, Any]) -> dict[str, Any]:
         "unit": unit,
         "source": source,
         "method": method,
+        "source_event_id": source_event_id,
+        "source_event_item_id": source_event_item_id,
         "confidence": _text(payload.get("confidence") or "user-reported", "confidence"),
         "original_text": original_text,
         "notes": _text(payload.get("notes"), "notes"),
@@ -111,6 +154,9 @@ def _normalize_workout(payload: dict[str, Any]) -> dict[str, Any]:
     start_time = _validate_time(payload.get("start_time"), "start_time")
     workout_type = _text(payload.get("workout_type"), "workout_type", required=True)
     source = _text(payload.get("training_source") or payload.get("source") or "user", "training_source")
+    method = _entry_method(payload)
+    source_event_id = _source_event_id(payload)
+    source_event_item_id = _source_event_item_id(payload, source_event_id)
     original_text = _clean_original_text(payload)
     numeric_fields = {
         "duration_minutes": _number(payload.get("duration_minutes"), "duration_minutes", minimum=0),
@@ -123,8 +169,22 @@ def _normalize_workout(payload: dict[str, Any]) -> dict[str, Any]:
     if numeric_fields["intensity_rpe"] is not None and numeric_fields["intensity_rpe"] > 10:
         raise ValueError("intensity_rpe must be between 0 and 10")
     external_id = _text(payload.get("external_id"), "external_id")
+    if source_event_item_id:
+        identity = [source, method, source_event_id, source_event_item_id]
+    elif source_event_id:
+        identity = [source, method, source_event_id, workout_type]
+    else:
+        identity = [
+            external_id,
+            day,
+            start_time,
+            workout_type,
+            source,
+            method,
+            original_text,
+        ]
     record_id = _text(payload.get("record_id"), "record_id") or stable_record_id(
-        "workout", [external_id, day, start_time, workout_type, source, original_text]
+        "workout", identity
     )
     return {
         "record_id": record_id,
@@ -135,7 +195,9 @@ def _normalize_workout(payload: dict[str, Any]) -> dict[str, Any]:
         "muscle_groups": _text(payload.get("muscle_groups"), "muscle_groups"),
         "training_source": source,
         "external_id": external_id,
-        "method": _text(payload.get("method") or "manual", "method"),
+        "method": method,
+        "source_event_id": source_event_id,
+        "source_event_item_id": source_event_item_id,
         "confidence": _text(payload.get("confidence") or "user-reported", "confidence"),
         "original_text": original_text,
         "notes": _text(payload.get("notes"), "notes"),
@@ -176,7 +238,11 @@ def _normalize_food(payload: dict[str, Any]) -> dict[str, Any]:
     day = _date(payload.get("date"))
     timestamp = _validate_time(payload.get("time"), "time")
     food_name = _text(payload.get("food_name"), "food_name", required=True)
+    meal = _text(payload.get("meal"), "meal")
     source = _text(payload.get("source") or "agent estimate", "source")
+    method = _entry_method(payload)
+    source_event_id = _source_event_id(payload)
+    source_event_item_id = _source_event_item_id(payload, source_event_id)
     original_text = _clean_original_text(payload)
     grams = {
         "estimated_grams": _number(payload.get("estimated_grams"), "estimated_grams", minimum=0),
@@ -193,19 +259,28 @@ def _normalize_food(payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(key, str):
             raise ValueError("summary_nutrients keys must be text")
         clean_summary[key] = _number(value, f"summary_nutrients.{key}", minimum=0)
+    if source_event_item_id:
+        identity = [source, method, source_event_id, source_event_item_id]
+    elif source_event_id:
+        identity = [source, method, source_event_id, meal, food_name]
+    else:
+        identity = [day, timestamp, meal, food_name, source, method, original_text]
     record_id = _text(payload.get("record_id"), "record_id") or stable_record_id(
-        "food", [day, timestamp, payload.get("meal", ""), food_name, original_text]
+        "food", identity
     )
     return {
         "record_id": record_id,
         "date": day,
         "time": timestamp,
-        "meal": _text(payload.get("meal"), "meal"),
+        "meal": meal,
         "food_name": food_name,
         **grams,
         "summary_nutrients": clean_summary,
         "nutrients": _normalize_nutrients(payload.get("nutrients")),
         "source": source,
+        "method": method,
+        "source_event_id": source_event_id,
+        "source_event_item_id": source_event_item_id,
         "estimation_notes": _text(payload.get("estimation_notes"), "estimation_notes"),
         "confidence": _text(payload.get("confidence") or "estimated", "confidence"),
         "image_reference": _text(payload.get("image_reference"), "image_reference"),

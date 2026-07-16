@@ -278,9 +278,12 @@ DAILY_FIELDS_BY_QUERY: dict[str, tuple[str, ...]] = {
 
 
 class CommandRunner:
-    def __init__(self, command: str, timeout: int = 90):
+    def __init__(
+        self, command: str, timeout: int = 90, *, profile: str | None = None
+    ):
         self.command = command
         self.timeout = timeout
+        self.profile = profile
 
     def run(self, arguments: list[str]) -> dict[str, Any]:
         environment = os.environ.copy()
@@ -288,6 +291,8 @@ class CommandRunner:
         # only JSON, so make the machine interface deterministic in foreground
         # shells as well as scheduled jobs.
         environment["GHEALTH_FORMAT"] = "json"
+        if self.profile is not None:
+            environment["GHEALTH_PROFILE"] = self.profile
         try:
             process = subprocess.Popen(
                 [self.command, *arguments],
@@ -451,16 +456,21 @@ class GHealthAdapter:
                 "ghealth did not return its active profile; reinstall the pinned ghealth version and run doctor again"
             )
 
-        active_name = "default"
-        active_type = "default"
-        for entry in profiles:
-            if not isinstance(entry, dict) or entry.get("active") is not True:
-                continue
-            name = entry.get("name")
-            if isinstance(name, str) and name:
-                active_name = name
-                active_type = "default" if name == "default" else "custom"
-            break
+        pinned_profile = getattr(self.runner, "profile", None)
+        if isinstance(pinned_profile, str) and pinned_profile:
+            active_name = pinned_profile
+            active_type = "default" if pinned_profile == "default" else "custom"
+        else:
+            active_name = "default"
+            active_type = "default"
+            for entry in profiles:
+                if not isinstance(entry, dict) or entry.get("active") is not True:
+                    continue
+                name = entry.get("name")
+                if isinstance(name, str) and name:
+                    active_name = name
+                    active_type = "default" if name == "default" else "custom"
+                break
 
         config_payload = self.runner.run(["config", "show", "--format", "json"])
         default_profile = config_payload.get("Default", config_payload.get("default", {}))

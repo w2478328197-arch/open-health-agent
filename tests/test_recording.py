@@ -116,6 +116,188 @@ def test_manual_measurement_correction_keeps_source_event_id() -> None:
     assert first["record_id"] == corrected["record_id"]
 
 
+def test_agent_facing_time_and_entry_method_aliases_are_normalized() -> None:
+    normalized = normalize_record(
+        "measurement",
+        {
+            "date": "2026-01-02",
+            "time": "08:25:22",
+            "metric": "腰围",
+            "value": 82,
+            "unit": "cm",
+            "entry_method": "wechat-text",
+        },
+    )
+    assert normalized["time"] == "08:25:22"
+    assert normalized["method"] == "wechat-text"
+
+    with pytest.raises(ValueError, match="must match"):
+        normalize_record(
+            "measurement",
+            {
+                "date": "2026-01-02",
+                "metric": "腰围",
+                "value": 82,
+                "unit": "cm",
+                "method": "manual",
+                "entry_method": "wechat-text",
+            },
+        )
+
+
+def test_source_event_id_distinguishes_new_messages_and_deduplicates_redelivery() -> None:
+    base = {
+        "date": "2026-01-02",
+        "metric": "体重",
+        "value": 70,
+        "unit": "kg",
+        "method": "wechat-text",
+        "original_text": "体重七十公斤",
+    }
+    first = normalize_record("measurement", base | {"source_event_id": "message-1"})
+    redelivery = normalize_record(
+        "measurement",
+        base
+        | {
+            "source_event_id": "message-1",
+            "value": 69.8,
+            "original_text": "更正为六十九点八公斤",
+        },
+    )
+    separate_message = normalize_record(
+        "measurement", base | {"source_event_id": "message-2"}
+    )
+
+    assert first["record_id"] == redelivery["record_id"]
+    assert separate_message["record_id"] != first["record_id"]
+    assert first["source_event_id"] == "message-1"
+
+
+@pytest.mark.parametrize(
+    ("kind", "base"),
+    [
+        (
+            "measurement",
+            {
+                "date": "2026-01-02",
+                "metric": "体重",
+                "value": 70,
+                "unit": "kg",
+            },
+        ),
+        (
+            "workout",
+            {
+                "date": "2026-01-02",
+                "workout_type": "合成训练",
+            },
+        ),
+        (
+            "food",
+            {
+                "consumed": True,
+                "date": "2026-01-02",
+                "food_name": "合成食物",
+            },
+        ),
+    ],
+)
+def test_source_event_item_id_distinguishes_repeated_items_in_one_message(
+    kind: str, base: dict,
+) -> None:
+    first = normalize_record(
+        kind,
+        base | {"source_event_id": "message-1", "source_event_item_id": "item-1"},
+    )
+    second = normalize_record(
+        kind,
+        base | {"source_event_id": "message-1", "source_event_item_id": "item-2"},
+    )
+
+    assert first["record_id"] != second["record_id"]
+
+    with pytest.raises(ValueError, match="requires source_event_id"):
+        normalize_record(kind, base | {"source_event_item_id": "item-1"})
+
+
+@pytest.mark.parametrize(
+    ("kind", "base", "corrected_field", "corrected_value"),
+    [
+        (
+            "measurement",
+            {
+                "date": "2026-01-02",
+                "metric": "体重",
+                "value": 70,
+                "unit": "kg",
+            },
+            "metric",
+            "晨间体重",
+        ),
+        (
+            "workout",
+            {"date": "2026-01-02", "workout_type": "步行"},
+            "workout_type",
+            "户外快走",
+        ),
+        (
+            "food",
+            {
+                "consumed": True,
+                "date": "2026-01-02",
+                "food_name": "面包",
+            },
+            "food_name",
+            "全麦面包",
+        ),
+    ],
+)
+def test_source_event_item_identity_survives_semantic_reparse_corrections(
+    kind: str, base: dict, corrected_field: str, corrected_value: str
+) -> None:
+    provenance = {
+        "source": "weixin",
+        "method": "wechat-text",
+        "source_event_id": "message-1",
+        "source_event_item_id": "item-1",
+    }
+    first = normalize_record(kind, base | provenance)
+    corrected = normalize_record(
+        kind, base | provenance | {corrected_field: corrected_value}
+    )
+
+    assert corrected["record_id"] == first["record_id"]
+
+
+def test_food_fallback_identity_includes_normalized_source_and_method() -> None:
+    base = {
+        "consumed": True,
+        "date": "2026-01-02",
+        "time": "12:00",
+        "meal": " 午餐 ",
+        "food_name": "合成食物",
+        "original_text": "合成食物",
+    }
+    first = normalize_record(
+        "food", base | {"source": "weixin", "method": "wechat-text"}
+    )
+    normalized_spacing = normalize_record(
+        "food",
+        base
+        | {
+            "meal": "午餐",
+            "source": "weixin",
+            "method": "wechat-text",
+        },
+    )
+    separate_source = normalize_record(
+        "food", base | {"source": "manual", "method": "terminal"}
+    )
+
+    assert first["record_id"] == normalized_spacing["record_id"]
+    assert first["record_id"] != separate_source["record_id"]
+
+
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
 def test_manual_records_reject_non_finite_numbers(value: float) -> None:
     with pytest.raises(ValueError, match="finite"):

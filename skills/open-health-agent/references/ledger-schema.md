@@ -1,5 +1,15 @@
 # Ledger schema and integrity contract
 
+## Contents
+
+- [Storage roles](#storage-roles)
+- [Copyable manual-entry examples](#copyable-manual-entry-examples)
+- [Managed workbook sheets](#managed-workbook-sheets)
+- [Record identity and deduplication](#record-identity-and-deduplication)
+- [Missing, quality, and confidence](#missing-quality-and-confidence)
+- [Workbook write discipline](#workbook-write-discipline)
+- [Time and aggregation rules](#time-and-aggregation-rules)
+
 ## Storage roles
 
 - **SQLite is the source of truth.** It provides stable identities, idempotent upserts, sync-run state, and an audit trail.
@@ -9,7 +19,9 @@
 
 Do not make Excel and SQLite independent writable masters. Manual records enter through the CLI/database, then export to Excel. Preserve user-created sheets that are not part of the managed health schema.
 
-For manual entries, prefer JSON on stdin or an owner-only `--file`. For goals/profile values, prefer stdin or their `--file` forms; literal `--json`, `--text`, and `--value` arguments can be visible in shell history and the local process list.
+A workbook in a recognized cloud-sync folder requires explicit exact-bound `cloud-workbook` consent before health-bearing projection. Without it, the SQLite mutation remains canonical and the workbook projection is reported blocked/pending; granting consent and running `open-health-agent export` repairs the view without replaying the health write. A synchronized private home or canonical database is a separate legacy risk and requires exact-bound `cloud-private-home` consent before health writes can continue; prefer migrating it back to local storage.
+
+For manual entries, prefer JSON on stdin or an owner-only `--file`. For goals/profile values, prefer stdin or their `--file` forms; literal `--json`, `--text`, and `--value` arguments can be visible in shell history, local process listings, and retained messaging-host tool calls. An Agent must not use the literal forms for real health content. Delete a temporary payload file immediately after the command succeeds or fails.
 
 ## Copyable manual-entry examples
 
@@ -166,6 +178,8 @@ Use a provider-issued immutable ID when available. For measurements, namespace i
 
 An overlapping sync must upsert the same record. Repeating the same import with unchanged source data must not increase row counts. A user correction should update/supersede the existing ID and emit an audit event, not append a conflicting row.
 
+For messaging hosts, `source_event_id` identifies the inbound message. If the same message yields multiple records with the same metric, workout type, or food name, add a stable opaque `source_event_item_id` (`item-1`, `item-2`, and so on) to each item. Reuse both IDs on redelivery; do not derive either from health wording or a signed media URL.
+
 The automatic ghealth path is upsert-only for measurement and workout events: it does not interpret a record missing from a later query as a provider-side deletion. Source deletions require explicit local reconciliation. When the provider omits an immutable external ID, timestamp-based fallback identity can update a value only while its identifying timestamp and type remain stable; correcting an untimed value/type/duration may create a second deterministic row that must be reviewed and explicitly superseded or removed.
 
 For daily aggregates, the local date is the logical identity. Recompute the date from the selected source rather than summing prior imports.
@@ -182,6 +196,8 @@ For daily aggregates, the local date is the logical identity. Recompute the date
 
 ## Workbook write discipline
 
+Before a SQLite-changing operation can become durable, persist a workbook-projection outbox marker under the shared lock. Commit SQLite first, project Excel second, and clear the marker only after the atomic workbook replacement succeeds. If consent is absent, export fails, or the process stops between those stages, return truthful `*_export_pending`/blocked status and leave the marker for `doctor`, `context`, and a later `export`; never roll back or conceal the successful canonical write merely because its readable projection is stale.
+
 All managed-sheet exports must:
 
 1. acquire the shared ledger lock;
@@ -194,6 +210,8 @@ All managed-sheet exports must:
 8. create a bounded local backup and enforce owner-only permissions when supported.
 
 Do not let an hourly sync, a manual message handler, and a legacy importer save the workbook separately. Route them through one database and writer.
+
+Do not hold the writer lock while running external `ghealth` work. Use short locked phases only for local consent, configuration, date range, and local runtime snapshot checks. Resolve and recheck the selected `ghealth` profile, account identity, timezone, account-bound fingerprint, and network fetch outside the lock; then reacquire the lock and revalidate the local snapshot before opening the transaction. Reject the whole batch if anything changed.
 
 ## Time and aggregation rules
 

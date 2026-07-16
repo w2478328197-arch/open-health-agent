@@ -22,15 +22,17 @@ For every non-emergency first invocation in each conversation, give a short expl
 - The wearable/device manufacturer, the Apple Health or Health Connect health-data store and platform account/app layers, Google Health/API, Weixin/WeChat and Tencent, the selected model provider, separate speech/vision services, and iCloud or another sync provider may each process data sent through their part of the path. Credentials, photos, goals, and real health records must stay out of Git.
 - This is a wellness/fitness record and decision-support tool, not a medical device, diagnosis, prescription, or emergency service.
 
+Some messaging gateways route an inbound image to native or auxiliary vision before the Skill can answer. A per-conversation explanation therefore cannot prevent a first-photo transfer. During gateway pairing/setup, disclose and obtain consent for the exact vision route before enabling automatic media analysis; until then require the first health message to be text and keep automatic vision disabled. Still give the short reminder in every new conversation.
+
 If the user already explicitly asked to install, sync, record, or configure, continue after the explanation. Otherwise obtain confirmation before creating a ledger, connecting an account, or installing a background schedule. Do not repeat the explanation later in the same conversation unless the data path or privacy terms materially change.
 
-After giving the explanation, if the local runtime is already installed, record only a local installation audit event with:
+Only after the host confirms that the user-visible explanation was successfully delivered, record a local installation audit event with:
 
 ```bash
-<installed-health-command> onboarding mark-explained
+<installed-health-command> onboarding mark-explained --delivery-confirmed
 ```
 
-Before connecting an external account or installing a background schedule, obtain explicit consent for that scoped action, then record it with `onboarding grant-consent`. These timestamps are an audit aid only. They never prove that the current conversation received the explanation and never replace this section's per-conversation explain-first requirement.
+If tool calls run before the final reply and the host has no outbound-success hook, do not mark the explanation in that same turn; mark it after delivery can be confirmed, such as on the next user turn. Before connecting an external account or installing a background schedule, obtain explicit consent for that scoped action, then record it with `onboarding grant-consent --scope <scope>`; inspect `--help` for the fixed scope list. These timestamps are an audit aid only. They never prove that the current conversation received the explanation and never replace this section's per-conversation explain-first requirement.
 
 ### 2. Load the local rules and fresh context
 
@@ -69,16 +71,27 @@ Record only events that actually happened.
 - A food purchase, recipe idea, menu, shopping list, unopened product, background object, or eating plan is not consumption. Do not add it to `饮食记录` as eaten.
 - Preserve the user's original wording or transcript. Store normalized values separately; never silently rewrite the source statement.
 - If a photo clearly accompanies “I ate this,” estimate food identity and portion as a range, retain the uncertainty and image reference, briefly echo the consumed item list, and let the user correct it.
-- In a dedicated health or diet conversation, a standalone close-up meal photo may be treated as confirmation to log actual consumption by default when there are no purchase, menu, recipe, unopened-package, planning, leftover-only, or background-object cues. Briefly echo what will be counted before writing. If the food identity or consumption context is materially ambiguous, ask one targeted question instead of guessing. Do not ask the user to weigh food; estimate a central portion and plausible range from visible count, size, labels, and context.
+- A standalone meal photo is not confirmation of consumption by default. It may be treated as “consumed; log this” without repeated confirmation only when the user has explicitly adopted that dedicated-conversation convention and it is saved in private `AGENTS.md`. Even then, purchase, menu, recipe, unopened-package, planning, leftover-only, or background-object cues block automatic logging. Briefly echo what will be counted before writing. Without the saved opt-in, or when identity/context is materially ambiguous, ask one targeted question instead of guessing. Do not ask the user to weigh food; estimate a central portion and plausible range from visible count, size, labels, and context.
 - If the model cannot inspect images, ask for a text description or, with the user's consent, use a configured vision-capable model. Do not infer an image from a filename or placeholder.
 - If a voice message has no trustworthy transcript and no speech-to-text tool is available, ask for text. Do not invent a transcript.
 - Manual measurements should include date/time, metric, value, unit, source, entry method, original wording, and confidence. A blood-pressure record needs both systolic and diastolic values.
-- Corrections update or supersede the existing stable record. Do not append a contradictory duplicate.
+- When the host exposes an opaque message/event ID, pass it as `source_event_id`. The CLI uses it to make redelivery idempotent while keeping two separate, identical messages distinct. When one message contains two records of the same metric/workout type/food name, also assign stable opaque `source_event_item_id` values such as `item-1` and `item-2`; reuse them on redelivery. Never invent a message ID or put a signed media URL, account identifier, or health wording in either field.
+- The CLI accepts measurement/workout time as `HH:MM`, `HH:MM:SS`, or full ISO-8601, and accepts `method` plus the compatible `entry_method` alias. When one utterance contains multiple measurements, write one record per metric with the same exact `original_text` and source event ID; the metric keeps their stable IDs distinct.
+- Corrections update or supersede the existing stable record. Prefer `record --record-id <stable-id>` so a missing target fails instead of creating a new ID. When the user self-corrects within one utterance, treat the final corrected value as authoritative, keep the exact original wording, and record only the corrected quantity.
 - Missing, unauthorized, not-worn, and not-yet-synced values stay null/blank. Never encode them as zero.
 - Store estimates, source, confidence, and coverage. Do not claim micronutrient completeness from one photo or diagnose a deficiency from food logging.
 - After every recording attempt, report whether the write succeeded, the stable record ID when written, and material confidence or uncertainty. Do not claim that a chat acknowledgement alone proves durable recording.
+- In an Agent or messaging host, never put health payloads or exact goals/profile values in literal `--json`, `--text`, or `--value` command arguments. Tool arguments and process command lines may be retained by the host. Send JSON/text over stdin or write an owner-only temporary file, use `--file`, and remove that temporary file immediately after the command. Synthetic terminal examples are the only exception.
+
+The CLI can return `recorded_export_pending`, `deleted_export_pending`, or a goal `*_export_pending` status. These mean the SQLite/control-data change succeeded but Excel did not refresh. Tell the user the durable write succeeded, include the stable ID when applicable, state that the workbook is stale, then repair the workbook and run `export`; never retry the mutation as a new event.
+
+Before the first write in an existing environment, compare the configured workbook destination with any known canonical/iCloud workbook. If they differ, report the actual destination and treat reconciliation or migration as a separate scoped task. Never edit managed Excel sheets directly to make two workbooks appear synchronized.
 
 Export the workbook only through the local writer so locking, atomic replacement, backups, permissions, and preserved non-health sheets remain intact. Never let two writers save the workbook independently.
+
+Never use a general code-execution or spreadsheet tool to open and save the managed health sheets. A legacy importer, an hourly job, a chat-triggered Python script, and the OHA CLI must not coexist as independent writers. Freeze and migrate old paths before enabling the OHA scheduler.
+
+Do not write health wording, measurements, goals, nutrition, media descriptions, record IDs, or context output into the host's global memory, general user profile, cross-chat summary, or shared retrieval store. Private SQLite and private `AGENTS.md` are the only persistent health stores unless the user explicitly authorizes a separate isolated destination. Never recover a goal from host memory; ask the user to confirm it and persist it through the local CLI.
 
 ## Goal contract
 

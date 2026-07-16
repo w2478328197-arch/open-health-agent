@@ -9,10 +9,16 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 
-# Import metadata changes on every overlapping sync even when the health value
-# did not. Ignoring these fields for equality prevents an hourly job from
-# duplicating the full health payload in the audit table indefinitely.
-_IMPORT_METADATA_FIELDS = {"batch_id", "data_until", "imported_at"}
+# Batch/import timestamps change on every overlapping sync even when the source
+# value did not. ``data_until`` is deliberately retained: it is the freshness
+# cutoff shown to the user and must advance even when the health value is equal.
+_IMPORT_METADATA_FIELDS = {"batch_id", "imported_at", "recorded_at"}
+
+
+def _business_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value for key, value in payload.items() if key not in _IMPORT_METADATA_FIELDS
+    }
 
 
 def utc_now() -> str:
@@ -29,18 +35,41 @@ def stable_record_id(kind: str, parts: Iterable[Any]) -> str:
 
 
 class HealthDatabase:
-    def __init__(self, path: Path):
+    REQUIRED_TABLES = {"records", "sync_runs", "audit_events"}
+
+    def __init__(self, path: Path, *, create: bool = True, read_only: bool = False):
+        if create and read_only:
+            raise ValueError("a newly created health database cannot be read-only")
         self.path = path
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(path, timeout=30)
-        try:
-            self.path.chmod(0o600)
-        except OSError:
-            pass
+        if create:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.connection = sqlite3.connect(path, timeout=30)
+        else:
+            if not self.path.is_file():
+                raise FileNotFoundError("canonical SQLite database is unavailable")
+            mode = "ro" if read_only else "rw"
+            self.connection = sqlite3.connect(
+                f"{self.path.expanduser().resolve().as_uri()}?mode={mode}",
+                timeout=30,
+                uri=True,
+            )
         self.connection.row_factory = sqlite3.Row
-        self.connection.execute("PRAGMA journal_mode=WAL")
         self.connection.execute("PRAGMA foreign_keys=ON")
-        self._initialize()
+        if create:
+            try:
+                self.path.chmod(0o600)
+            except OSError:
+                pass
+            self.connection.execute("PRAGMA journal_mode=WAL")
+            self._initialize()
+        else:
+            try:
+                self._validate_existing_schema()
+                if not read_only:
+                    self.connection.execute("PRAGMA journal_mode=WAL")
+            except BaseException:
+                self.connection.close()
+                raise
 
     def close(self) -> None:
         self.connection.close()
@@ -91,16 +120,45 @@ class HealthDatabase:
             );
             """
         )
+        self._validate_sync_runs_rowid()
         self.connection.commit()
+
+    def _validate_sync_runs_rowid(self) -> None:
+        """Require the insertion-order key used to disambiguate equal timestamps."""
+
+        try:
+            self.connection.execute("SELECT rowid FROM sync_runs LIMIT 0")
+        except sqlite3.OperationalError as exc:
+            raise sqlite3.DatabaseError(
+                "sync_runs must be a rowid table for deterministic run ordering"
+            ) from exc
+
+    def _validate_existing_schema(self) -> None:
+        tables = {
+            str(row[0])
+            for row in self.connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        if not self.REQUIRED_TABLES.issubset(tables):
+            raise sqlite3.DatabaseError("canonical SQLite schema is incomplete")
+        self._validate_sync_runs_rowid()
+        integrity_rows = self.connection.execute("PRAGMA quick_check").fetchall()
+        if not integrity_rows or any(str(row[0]) != "ok" for row in integrity_rows):
+            raise sqlite3.DatabaseError("canonical SQLite integrity check failed")
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
+        owns_transaction = not self.connection.in_transaction
         try:
-            self.connection.execute("BEGIN IMMEDIATE")
+            if owns_transaction:
+                self.connection.execute("BEGIN IMMEDIATE")
             yield self.connection
-            self.connection.commit()
+            if owns_transaction:
+                self.connection.commit()
         except Exception:
-            self.connection.rollback()
+            if owns_transaction:
+                self.connection.rollback()
             raise
 
     def upsert(
@@ -131,16 +189,8 @@ class HealthDatabase:
             # corrections still update because every health field remains part
             # of this comparison.
             if existing_payload:
-                old_business = {
-                    key: value
-                    for key, value in existing_payload.items()
-                    if key not in _IMPORT_METADATA_FIELDS
-                }
-                new_business = {
-                    key: value
-                    for key, value in normalized.items()
-                    if key not in _IMPORT_METADATA_FIELDS
-                }
+                old_business = _business_payload(existing_payload)
+                new_business = _business_payload(normalized)
                 if canonical_json(old_business) == canonical_json(new_business):
                     return selected_id
 
@@ -166,6 +216,31 @@ class HealthDatabase:
                 (now, action, kind, selected_id, encoded),
             )
         return selected_id
+
+    def upsert_would_change(
+        self,
+        kind: str,
+        payload: dict[str, Any],
+        record_id: str | None = None,
+        *,
+        merge_existing: bool = False,
+    ) -> bool:
+        """Predict whether ``upsert`` will mutate rows, without starting a write."""
+
+        selected_id = record_id or str(payload.get("record_id") or "")
+        if not selected_id:
+            raise ValueError(f"record_id is required for {kind}")
+        existing = self.get(kind, selected_id)
+        if existing is None:
+            return True
+        normalized = dict(payload)
+        normalized["record_id"] = selected_id
+        if merge_existing:
+            normalized = existing | normalized
+            normalized["record_id"] = selected_id
+        return canonical_json(_business_payload(existing)) != canonical_json(
+            _business_payload(normalized)
+        )
 
     def delete(self, kind: str, record_id: str, reason: str) -> bool:
         with self.transaction():
@@ -213,14 +288,14 @@ class HealthDatabase:
         return json.loads(row["payload_json"]) if row else None
 
     def begin_sync(self, batch_id: str, from_date: str, to_date: str) -> None:
-        self.connection.execute(
-            """
-            INSERT INTO sync_runs(batch_id, started_at, from_date, to_date, status)
-            VALUES (?, ?, ?, ?, 'running')
-            """,
-            (batch_id, utc_now(), from_date, to_date),
-        )
-        self.connection.commit()
+        with self.transaction():
+            self.connection.execute(
+                """
+                INSERT INTO sync_runs(batch_id, started_at, from_date, to_date, status)
+                VALUES (?, ?, ?, ?, 'running')
+                """,
+                (batch_id, utc_now(), from_date, to_date),
+            )
 
     def finish_sync(
         self,
@@ -232,27 +307,55 @@ class HealthDatabase:
         data_until: str | None,
         errors: list[str],
     ) -> None:
-        self.connection.execute(
-            """
-            UPDATE sync_runs SET finished_at=?, status=?, daily_count=?, workout_count=?,
-                measurement_count=?, data_until=?, errors_json=? WHERE batch_id=?
-            """,
-            (
-                utc_now(),
+        with self.transaction():
+            self.connection.execute(
+                """
+                UPDATE sync_runs SET finished_at=?, status=?, daily_count=?, workout_count=?,
+                    measurement_count=?, data_until=?, errors_json=? WHERE batch_id=?
+                """,
+                (
+                    utc_now(),
+                    status,
+                    daily_count,
+                    workout_count,
+                    measurement_count,
+                    data_until,
+                    canonical_json(errors),
+                    batch_id,
+                ),
+            )
+
+    def apply_sync_result(
+        self,
+        batch_id: str,
+        records: Iterable[tuple[str, dict[str, Any], str]],
+        *,
+        status: str,
+        daily_count: int,
+        workout_count: int,
+        measurement_count: int,
+        data_until: str | None,
+        errors: list[str],
+    ) -> None:
+        """Commit all normalized rows and their final run status atomically."""
+
+        with self.transaction():
+            for kind, payload, record_id in records:
+                self.upsert(kind, payload, record_id)
+            self.finish_sync(
+                batch_id,
                 status,
                 daily_count,
                 workout_count,
                 measurement_count,
                 data_until,
-                canonical_json(errors),
-                batch_id,
-            ),
-        )
-        self.connection.commit()
+                errors,
+            )
 
     def list_sync_runs(self, limit: int = 200) -> list[dict[str, Any]]:
         rows = self.connection.execute(
-            "SELECT * FROM sync_runs ORDER BY started_at DESC LIMIT ?", (limit,)
+            "SELECT * FROM sync_runs ORDER BY started_at DESC, rowid DESC LIMIT ?",
+            (limit,),
         ).fetchall()
         output: list[dict[str, Any]] = []
         for row in rows:
@@ -260,6 +363,16 @@ class HealthDatabase:
             item["errors"] = json.loads(item.pop("errors_json"))
             output.append(item)
         return output
+
+    def get_sync_run(self, batch_id: str) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            "SELECT * FROM sync_runs WHERE batch_id=?", (batch_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        item["errors"] = json.loads(item.pop("errors_json"))
+        return item
 
     def prune_history(self, *, audit_limit: int, sync_limit: int) -> None:
         if audit_limit < 1 or sync_limit < 1:
@@ -278,7 +391,7 @@ class HealthDatabase:
                 """
                 DELETE FROM sync_runs
                 WHERE batch_id NOT IN (
-                    SELECT batch_id FROM sync_runs ORDER BY started_at DESC, batch_id DESC LIMIT ?
+                    SELECT batch_id FROM sync_runs ORDER BY started_at DESC, rowid DESC LIMIT ?
                 )
                 """,
                 (sync_limit,),

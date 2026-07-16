@@ -28,34 +28,45 @@
 
 ## 可穿戴与 Google Health
 
-Google 的[第三方设备连接说明](https://support.google.com/googlehealth/answer/14236613?hl=en-GB)列出 Apple Watch、Garmin、Samsung、Whoop、Oura 等示例，也明确不同设备/指标路径不同。正确表述是：
+Google 的[第三方设备连接说明](https://support.google.com/googlehealth/answer/14236613?hl=en)列出 Apple Watch、Garmin、Xiaomi、Samsung、Whoop、Oura、Withings、Zepp/Amazfit 等路径，也明确不同设备和指标的缺口。正确表述是：
 
-> 只要设备数据经厂商 App 写入 Health Connect 或 Apple Health、同步到 Google Health、获得相应 OAuth scope，并被 Google Health API 返回，本项目就能导入对应指标。
+> 只有当设备数据经厂商 App 写入 Health Connect、Apple Health 或 Google 的直接路径，目标指标已出现在 Google Health，获得相应 OAuth 只读 scope，被 Google Health API 返回，而且属于 OHA 当前映射的 14 类查询时，本项目才会自动导入该指标。
 
 不要表述成“凡是手表都支持”或“支持品牌就支持所有指标”。
 
-| 来源示例 | 典型前置链路 | 必须验证 |
-|---|---|---|
-| Apple Watch | Watch → Apple Health → Google Health | 机型支持、Apple Health 权限、Google 显示的指标 |
-| Garmin | Watch → Garmin Connect → Health Connect/Apple Health → Google Health | Garmin 定期同步；Google 不直连设备 |
-| Xiaomi | Watch/Band → Mi Fitness 或当前厂商 App → Health Connect/Apple Health → Google Health | 厂商当前是否写目标指标；地区/版本差异 |
-| Samsung | Galaxy Watch/Samsung Health → Health Connect → Google Health | 数据类型与读写权限 |
-| Whoop/Oura | 厂商 App → Health Connect/Apple Health → Google Health | 订阅、授权与指标映射 |
-| 手工设备 | 微信/CLI 文字、语音转写、视觉读数 | 单位、时间、来源、置信度 |
+`ghealth` 当前列出 40 类已验证 API 数据；OHA 只自动查询：`steps`、`distance`、`active-energy-burned`、`active-minutes`、`daily-resting-heart-rate`、`daily-heart-rate-variability`、`daily-oxygen-saturation`、`daily-respiratory-rate`、`daily-vo2-max`、`weight`、`body-fat`、`height`、`sleep --detail`、`exercise`。上游其余类型不会因为安装了 `ghealth` 就自动进入档案。
+
+下表按 2026-07-14 的 Google 官方页面整理；它不是硬件白名单。
+
+| 来源 | 典型链路 | Google 列出的代表性数据 | 明确缺口/条件 |
+|---|---|---|---|
+| Fitbit / Pixel Watch | Google 第一方路径 | 步数、距离、睡眠、训练、静息心率和部分型号的夜间生命体征 | 型号、地区和资格相关；OHA 不映射全天心率、皮温、ECG/心律提醒 |
+| Apple Watch | Apple Health → Google Health | 活动、睡眠、训练/路线、体重、VO₂ max、心率和夜间生命体征 | 无运动分钟、站立小时、ECG/心律提醒和全天生命体征 |
+| Garmin | Garmin Connect → Health Connect/Apple Health → Google Health | 活动、睡眠、训练摘要、心率/静息心率、体重 | 无 HRV、呼吸率、SpO₂、VO₂ max、皮温、路线/分圈 |
+| Mi Fitness / Xiaomi | Health Connect → Google Health；Android only | 运动中心率、活动、睡眠、训练/地图、体重 | 无 HRV、呼吸率、SpO₂、VO₂ max、皮温或运动外心率 |
+| Samsung Galaxy Watch | Samsung Health → Health Connect → Google Health；Android only | 活动、睡眠、训练、心率、SpO₂、VO₂ max、体重 | 无静息心率、HRV、呼吸率、皮温、路线/分圈；需额外同意健康数据处理 |
+| Oura | Oura App → Health Connect/Apple Health → Google Health | 活动、睡眠、训练摘要、心率、HRV、体重 | 无静息心率、呼吸率、SpO₂、VO₂ max、皮温、路线/分圈 |
+| Whoop | Whoop App → Health Connect → Google Health；Android only | 活动、睡眠、训练、静息心率、呼吸率、SpO₂、体重 | 无 HRV、VO₂ max、皮温、运动外心率、路线/分圈 |
+| Withings | Withings App → Health Connect/Apple Health → Google Health | 逐项验证 | Google 明确说明 Withings 血压尚不支持；改用微信/CLI 手工记录 |
+| Zepp / Amazfit | Zepp → Health Connect/Apple Health → Google Health | 活动、睡眠、训练、静息心率、体重、呼吸率、VO₂ max、SpO₂、路线 | 无 HRV、皮温、楼层、分圈和心律提醒 |
 
 `ghealth` 是 [Google-Health-API/google-health-cli](https://github.com/Google-Health-API/google-health-cli)，查询 [Google Health API](https://developers.google.com/health)；不是直接 Health Connect 客户端。
 
 ## 模型能力
 
-| 输入 | 最低能力 | 不具备时 |
+| Hermes provider / 模型路径 | 原生图片输入 | 结论 |
 |---|---|---|
-| 文字饮食/测量 | 文本模型 + 本地命令 | 仍可使用 |
-| 微信语音 | 可靠转写文本或 STT | 请用户补文字，不猜 |
-| 食物照片 | 视觉模型/工具 | 请用户描述食物与份量 |
-| 血压计/报告照片 | 视觉 + 清晰图片 + 人工确认歧义 | 手动输入数值/单位 |
-| 微量营养素 | 食物身份、份量和可靠营养来源 | 留空并报告覆盖，不编造 |
+| OpenAI Codex（ChatGPT OAuth） | 当前支持 vision 的 Codex 模型可以 | 仍需从 Weixin 端实测；OAuth 不等于 API key |
+| OpenAI API | 仅选中的 vision-capable GPT 模型 | 核对具体 model ID |
+| Anthropic Claude | Claude vision 模型支持 | 需走正确原生图像格式 |
+| Google Gemini | 当前 Gemini 文档列为多模态 | 仍受 endpoint/model/Hermes 版本影响 |
+| Nous Portal/OpenRouter/Copilot/Bedrock | 取决于其中选中的模型 | 聚合器名称本身不证明能力 |
+| DeepSeek 官方 API | 当前直接 chat API 为 text-only | 可由 Hermes `auxiliary.vision` 使用第二个视觉模型先描述图片，但这不是 DeepSeek 原生视觉 |
+| 本地/自建 endpoint | 取决于模型和服务协议 | Qwen-VL/MiMo-VL 等视觉模型与文本模型分开验收 |
 
-每次换 provider/model 后重新测试图片和语音。ChatGPT OAuth 在 Hermes 中是 OpenAI Codex provider；它不代表任意辅助模型或外部 API 自动获得相同能力。
+图片链路必须同时通过消息入站、Hermes 媒体路由和模型/辅助模型三层。语音是独立能力：入站音频不等于已有转写。当前本机 Hermes v0.18.0 的 Weixin 无转写语音为 SILK，而内置 STT 格式列表不含 SILK；没有明确转码/自定义 STT 时请用户补文字。每次换 Hermes/provider/model 后分别测试文字、无敏感图片和固定语音。
+
+模型即使看得见照片，也不能可靠恢复所有隐藏用油、份量、钠或微量营养；缺字段留空并报告覆盖率。
 
 ## 最小兼容性测试
 
@@ -65,7 +76,7 @@ Google 的[第三方设备连接说明](https://support.google.com/googlehealth/
 2. 能读取私有 `AGENTS.md` 和 context；断开读取时诚实报错。
 3. 同一手工记录重复提交不重复。
 4. ghealth fixture/真实小查询可分页、去重、标注来源和截止时间。
-5. 购买、菜单、计划和背景食物不记；专用健康对话中的近距离餐食照只有在无上述线索时才可按默认约定记为已摄入。
+5. 购买、菜单、计划和背景食物不记；单独餐食照默认不等于已摄入，只有用户已明确选择并在私有 `AGENTS.md` 保存专用对话约定，且无上述线索时才可省略重复确认。
 6. 无视觉时不描述图片；无 STT 时不编造语音。
 7. 当天建议标注 partial；训练日与休息日建议不同。
 8. `total_energy` 不再叠加 REE/运动/TEF。

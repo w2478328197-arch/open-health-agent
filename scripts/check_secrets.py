@@ -24,6 +24,52 @@ IGNORED_PARTS = {
     "venv",
 }
 MAX_FILE_BYTES = 12 * 1024 * 1024
+ALLOWED_BINARY_PATHS = {
+    Path("skills/open-health-agent/assets/health-ledger.xlsx"),
+}
+PRIVATE_FILENAMES = {
+    "agents.md",
+    "profile.json",
+    "config.json",
+    "state.json",
+    "credentials.json",
+    "pending_auth.json",
+    "auth.json",
+    "tokens.json",
+}
+PRIVATE_SUFFIXES = {
+    ".sqlite",
+    ".sqlite3",
+    ".db",
+    ".db-shm",
+    ".db-wal",
+    ".sqlite-shm",
+    ".sqlite-wal",
+    ".log",
+    ".silk",
+    ".wav",
+    ".m4a",
+    ".mp3",
+    ".mp4",
+    ".mov",
+    ".webm",
+    ".pdf",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".csv",
+    ".tsv",
+    ".jsonl",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".heic",
+    ".webp",
+    ".gif",
+    ".bmp",
+    ".tif",
+    ".tiff",
+}
 
 
 @dataclass(frozen=True)
@@ -36,7 +82,6 @@ class Finding:
 def patterns() -> list[tuple[str, re.Pattern[str]]]:
     slash_users = "/" + "Users/"
     slash_home = "/" + "home/"
-    private_fragment = "wang" + "chen"
     token_prefixes = (
         "gh" + "p_",
         "github" + "_pat_",
@@ -98,9 +143,9 @@ def patterns() -> list[tuple[str, re.Pattern[str]]]:
             ),
         ),
         (
-            "known private workstation path",
+            "absolute user workstation path",
             re.compile(
-                rf"(?:{re.escape(slash_users)}|[A-Za-z]:\\Users\\){re.escape(private_fragment)}",
+                rf"(?:{re.escape(slash_users)}[^/\s]+|[A-Za-z]:\\Users\\[^\\\s]+)",
                 re.IGNORECASE,
             ),
         ),
@@ -154,6 +199,41 @@ def scan(root: Path = ROOT) -> list[Finding]:
     findings: list[Finding] = []
     checks = patterns()
     for path in repository_files(root):
+        relative = path.relative_to(root)
+        if path.is_symlink():
+            findings.append(
+                Finding(relative, "symbolic link is not allowed in the release tree", 0)
+            )
+            if len(findings) >= 100:
+                return findings
+            continue
+        relative_lower = Path(*[part.casefold() for part in relative.parts])
+        filename_lower = path.name.casefold()
+        private_filename = filename_lower in PRIVATE_FILENAMES or any(
+            filename_lower.startswith(f"{name}.backup-")
+            for name in PRIVATE_FILENAMES
+        )
+        suffixes = "".join(path.suffixes).casefold()
+        private_suffix = next(
+            (
+                suffix
+                for suffix in PRIVATE_SUFFIXES
+                if suffixes.endswith(suffix)
+            ),
+            None,
+        )
+        if relative_lower not in ALLOWED_BINARY_PATHS and (
+            private_filename or private_suffix is not None
+        ):
+            label = (
+                "private control-data filename"
+                if private_filename
+                else f"private or unsupported binary extension ({private_suffix})"
+            )
+            findings.append(Finding(relative, label, path.stat().st_size))
+            if len(findings) >= 100:
+                return findings
+            continue
         try:
             size = path.stat().st_size
         except OSError:
