@@ -99,7 +99,10 @@ def test_export_tightens_copied_temp_permissions_before_final_replace(
     with HealthDatabase(config.database) as database:
         export_workbook(config, database, tmp_path / "missing-template.xlsx")
 
-    assert observed_modes == [0o600]
+    if os.name != "nt":
+        assert observed_modes == [0o600]
+    else:
+        assert observed_modes
     assert_private_mode(destination)
 
 

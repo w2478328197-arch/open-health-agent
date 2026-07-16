@@ -349,6 +349,20 @@ def _prepare_macos_log_files(config: Config) -> None:
     """Create launchd logs without following attacker-controlled links."""
 
     logs = config.home_path / "logs"
+    if os.name == "nt":
+        logs.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if logs.is_symlink() or not logs.is_dir():
+            raise PermissionError(
+                "scheduler logs directory must be a private, non-symlink directory owned by the current user"
+            )
+        for name in ("scheduler.out.log", "scheduler.err.log"):
+            path = logs / name
+            if path.exists() and (path.is_symlink() or not path.is_file()):
+                raise PermissionError(
+                    "scheduler log files must be private, non-symlink regular files owned by the current user"
+                )
+            path.touch(exist_ok=True)
+        return
     try:
         logs.mkdir(mode=0o700, parents=True)
         directory_created = True
