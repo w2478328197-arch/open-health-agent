@@ -8,7 +8,8 @@ from typing import Any
 import pytest
 
 import health_agent
-from oha.config import create_config, save_config
+from oha.config import atomic_write_json, create_config, save_config
+from oha.database import HealthDatabase
 from oha.ghealth_adapter import GHealthAdapter, GHealthError
 
 
@@ -83,7 +84,7 @@ def test_doctor_reports_timezone_mismatch_and_action_without_mutating_profile(
     config = create_config(tmp_path / "private", timezone="Asia/Shanghai", ghealth_command=sys.executable)
     save_config(config)
     runner = ConfigRunner(default_timezone="UTC")
-    monkeypatch.setattr(health_agent, "CommandRunner", lambda _command: runner)
+    monkeypatch.setattr(health_agent, "CommandRunner", lambda *_args, **_kwargs: runner)
     monkeypatch.setattr(health_agent, "scheduler_status", lambda _config: {"installed": False})
 
     result = health_agent.command_doctor(Namespace(home=str(config.home_path), offline=True))
@@ -144,9 +145,35 @@ def test_real_sync_checks_timezone_before_creating_a_sync_run(
 ) -> None:
     config = create_config(tmp_path / "private", timezone="Asia/Shanghai", ghealth_command=sys.executable)
     save_config(config)
+    with HealthDatabase(config.database):
+        pass
+    atomic_write_json(
+        config.home_path / "state.json",
+        {
+            "onboarding_consents": {
+                "google-health": {
+                    "granted_at": "2026-01-01T00:00:00+00:00",
+                    "policy_version": 1,
+                }
+            }
+        },
+    )
     runner = ConfigRunner(default_timezone="UTC")
-    monkeypatch.setattr(health_agent, "CommandRunner", lambda _command: runner)
+    monkeypatch.setattr(health_agent, "CommandRunner", lambda *_args, **_kwargs: runner)
 
+    monkeypatch.setattr(
+        health_agent, "static_runtime_fingerprint", lambda _config: "a" * 64
+    )
+    monkeypatch.setattr(
+        health_agent,
+        "resolve_active_ghealth_profile",
+        lambda _config: "default",
+    )
+    monkeypatch.setattr(
+        health_agent,
+        "ghealth_runtime_fingerprint",
+        lambda _config, _profile=None: "b" * 64,
+    )
     with pytest.raises(GHealthError, match=r"ghealth config set timezone Asia/Shanghai"):
         health_agent.command_sync(
             Namespace(
@@ -158,7 +185,8 @@ def test_real_sync_checks_timezone_before_creating_a_sync_run(
             )
         )
 
-    assert not config.database.exists()
+    with HealthDatabase(config.database) as database:
+        assert database.list_sync_runs() == []
 
 
 def test_public_errors_keep_timezone_and_scheduler_failures_actionable_without_echoing_details() -> None:

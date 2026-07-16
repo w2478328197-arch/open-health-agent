@@ -3,8 +3,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
 from openpyxl import Workbook, load_workbook
 
+import oha.workbook_store as workbook_store
 from oha.config import create_config
 from oha.constants import SHEET_HEADERS
 from oha.database import HealthDatabase
@@ -73,6 +75,32 @@ def test_export_preserves_non_health_sheet_and_builds_health_views(tmp_path: Pat
         assert summary["N2"].value < summary["O2"].value < summary["P2"].value
     finally:
         check.close()
+
+
+def test_export_tightens_copied_temp_permissions_before_final_replace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "private-home"
+    destination = tmp_path / "health.xlsx"
+    workbook = Workbook()
+    workbook.save(destination)
+    workbook.close()
+    destination.chmod(0o644)
+    config = create_config(home, workbook=destination, timezone="UTC")
+    observed_modes: list[int] = []
+    original_replace = workbook_store.os.replace
+
+    def inspect_replace(source, target):
+        if Path(target) == destination:
+            observed_modes.append(Path(source).stat().st_mode & 0o777)
+        return original_replace(source, target)
+
+    monkeypatch.setattr(workbook_store.os, "replace", inspect_replace)
+    with HealthDatabase(config.database) as database:
+        export_workbook(config, database, tmp_path / "missing-template.xlsx")
+
+    assert observed_modes == [0o600]
+    assert_private_mode(destination)
 
 
 def test_prune_backups_keeps_newest_files(tmp_path: Path) -> None:

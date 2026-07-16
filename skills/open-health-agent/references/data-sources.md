@@ -73,6 +73,7 @@ Always re-check [Google's current device compatibility page](https://support.goo
 - Assign sleep to the wake/end date. `实际睡眠时长_h` means time asleep and excludes awake minutes; prefer an explicit `minutesAsleep`, otherwise sum compatible asleep stages, or subtract known awake time from a compatible in-bed total. Do not add overlapping sleep sessions from multiple sources. Select one coherent session/source according to configured priority and retain the chosen source.
 - Label current-day health and energy as “截至目前/partial.” Use completed days for baselines.
 - Record the source's data cutoff separately from the local import time. Compare real timestamps as timezone-aware instants, and calculate the cutoff independently for each daily row; a partial import must identify stale retained fields rather than applying one global cutoff to every date.
+- Treat a real import as a two-phase operation around external `ghealth` work. Under the writer lock, pin only local consent, configuration, date range, and the local runtime snapshot; resolve and recheck selected profile/account identity, timezone, account-bound fingerprint, and the network fetch outside the lock; then reacquire it and revalidate the local snapshot before applying rows. If consent is withdrawn or identity/configuration drifts, reject the fetched batch before persistence. This keeps slow external reads and identity checks from blocking unrelated manual writes without weakening authorization checks.
 
 ## Source semantics
 

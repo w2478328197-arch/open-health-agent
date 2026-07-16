@@ -87,13 +87,58 @@ def test_install_tree_keeps_distinct_backups_for_rapid_updates(tmp_path: Path) -
     source.joinpath("payload.txt").write_text("v2", encoding="utf-8")
     assert installer.install_tree(source, destination, dry_run=False, force=True) == "installed"
 
-    backups = list(destination.parent.glob(f"{installer.SKILL_NAME}.backup-*"))
+    backups = list(
+        installer.skill_backup_directory(destination.parent).glob(
+            f"{installer.SKILL_NAME}.backup-*"
+        )
+    )
     assert len(backups) == 2
+    assert not installer.skill_backup_directory(destination.parent).is_relative_to(
+        destination.parent
+    )
     assert len({backup.name for backup in backups}) == 2
     assert sorted(backup.joinpath("payload.txt").read_text(encoding="utf-8") for backup in backups) == [
         "v0",
         "v1",
     ]
+
+
+def test_discoverable_skill_backups_are_quarantined(tmp_path: Path) -> None:
+    destination = tmp_path / "skills" / installer.SKILL_NAME
+    legacy = make_tree(
+        destination.parent / f"{installer.SKILL_NAME}.backup-legacy",
+        "legacy",
+    )
+    legacy.joinpath("SKILL.md").write_text(
+        "---\nname: open-health-agent\n---\n", encoding="utf-8"
+    )
+
+    moved = installer.quarantine_discoverable_backups(destination, dry_run=False)
+
+    assert not legacy.exists()
+    assert len(moved) == 1
+    assert moved[0].is_dir()
+    assert moved[0].parent == installer.skill_backup_directory(destination.parent)
+    assert not moved[0].is_relative_to(destination.parent)
+    assert not list(destination.parent.glob(f"{installer.SKILL_NAME}.backup-*"))
+
+
+def test_prior_hidden_backup_directory_is_moved_out_of_skill_discovery_root(
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "host" / "skills" / installer.SKILL_NAME
+    old_hidden = destination.parent / f".{installer.SKILL_NAME}-backups"
+    legacy = make_tree(old_hidden / "legacy-copy", "legacy")
+    legacy.joinpath("SKILL.md").write_text(
+        "---\nname: open-health-agent\n---\n", encoding="utf-8"
+    )
+
+    moved = installer.quarantine_discoverable_backups(destination, dry_run=False)
+
+    assert len(moved) == 1
+    assert not old_hidden.exists()
+    assert moved[0].is_dir()
+    assert not moved[0].is_relative_to(destination.parent)
 
 
 def test_install_tree_copy_failure_does_not_move_destination(

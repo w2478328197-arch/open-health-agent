@@ -511,6 +511,11 @@ def export_workbook(config: Config, database: HealthDatabase, template: Path) ->
                 workbook.save(temp)
             finally:
                 workbook.close()
+        # ``copy2`` carries the source mode. Tighten the temporary file before
+        # any private database rows are serialized into it; otherwise a public
+        # template or pre-existing workbook can create a brief 0644 health file
+        # in a shared/synchronized directory.
+        os.chmod(temp, 0o600)
 
         workbook = load_workbook(temp)
         try:

@@ -77,10 +77,26 @@ hermes chat -q "/open-health-agent 帮我开始建立健康档案"
 说明完成后，可把它作为本地安装审计记录下来；这不是跨会话免说明标志：
 
 ```bash
-open-health-agent onboarding mark-explained
+open-health-agent onboarding mark-explained --delivery-confirmed
 ```
 
-每个新会话仍须先说明。连接 Google/微信等外部账号或安装后台任务前，取得针对该动作的明确同意，再运行 `open-health-agent onboarding grant-consent`。状态时间戳不能代替当前会话的说明或扩大同意范围。
+只有 outbound-success hook 或下一轮用户消息确认说明已成功送达后，才运行这条命令；若 Hermes 在最终回复前执行工具，本轮不能先标记。每个新会话仍须先说明。连接 Google/微信等外部账号或安装后台任务前，取得针对该动作的明确同意，再运行 `open-health-agent onboarding grant-consent --scope <scope>`，固定 scope 列表以 `--help` 为准。状态时间戳不能代替当前会话的说明或扩大同意范围。
+
+例如要启用 Google Health，先确认说明送达，再记录这条独立同意：
+
+```bash
+open-health-agent onboarding grant-consent --scope google-health
+```
+
+它只允许 OHA 使用这条链路，不会替用户完成 Google OAuth 或安装 scheduler。项目安装器也不会自动安装后台健康任务。
+
+如果配置的 Excel 视图位于 iCloud、OneDrive、Dropbox 等同步目录，写入任何健康投影前还要单独记录：
+
+```bash
+open-health-agent onboarding grant-consent --scope cloud-workbook
+```
+
+缺少该 consent 时，Hermes 仍可把记录可靠写入 SQLite，但必须如实报告 `*_export_pending` / `blocked_by_consent`，不能声称 Excel 已更新。授权后运行 `open-health-agent export` 恢复视图；若先前的 Google 手动同步被云投影阻塞，还需重新真实同步一次才能取得 scheduler 安装资格。
 
 ## 4. 连接微信
 
@@ -119,6 +135,8 @@ hermes pairing list
 ```
 
 批准后再发一条不敏感消息，确认本人能得到正常 Agent 回复。若能用另一个未批准账号测试，它最多应进入 pairing 流程，不能得到 Agent 健康回复。`hermes pairing list` 会显示完整的待批准/已批准身份；普通 Weixin gateway 日志可能会截断 ID，不能从截断日志拼接 `WEIXIN_ALLOWED_USERS`。保持 `pairing` 策略即可只授权已批准用户；若明确改用 `allowlist`，只能复制 pairing 列表中的完整 ID。**批准完成前不要发送任何健康文字、照片或语音。** iLink bot 是独立联系人；pairing/allowlist 都是入站访问控制，不是邀请机制。
+
+同一个 Hermes profile 中启用的飞书、QQ、Slack 等其他平台也必须限制到本人；微信已 pairing 不能弥补另一个渠道的 allow-all。健康场景优先使用独立 Hermes profile/iLink bot，只暴露 `open-health-agent` 专用命令和必要的只读诊断，不给任意来信者通用 terminal、file、memory 或 `execute_code`。禁止用 `execute_code`/openpyxl 直接保存旧健康 Excel；所有受管健康写入都必须进入 OHA SQLite 和同一把锁。
 
 微信入站可包含图片、文件、视频和语音。Hermes 会下载/解密媒体供 Agent 处理；当前版本可能缓存于 `~/.hermes/cache/images`、`audio`、`videos`、`documents`。缓存行为随 Hermes 版本和媒体类型变化，不能承诺自动删除，尤其音频/视频可能保留。限制该目录的本机访问权限，按当前版本核查并清理不再需要的媒体。媒体会经过腾讯和本机，也可能发送给已配置模型、STT 或视觉服务商。语音只有在微信提供转写或另有 STT 时才是可用文本。
 
@@ -179,16 +197,31 @@ open-health-agent doctor
 
 健康同步和 Hermes gateway 是两个服务：gateway 接消息，健康任务读 Google 并写 SQLite/Excel。它们必须共用同一个账本写入器，不能各自直接保存 Excel。
 
-只在手动同步成功后安装一个小时任务，并停用旧 cron/launchd/importer，避免双写：
+SQLite 写入采用可恢复的 workbook-projection outbox：在数据库变化可能持久化前先写 pending 标记，提交 SQLite 后才尝试 Excel 原子投影，投影成功再清除。缺少云工作簿同意、文件占用、权限错误或崩溃都只会留下待恢复的 Excel 投影；Hermes 必须报告数据库已成功而 Excel pending，并在原因修复后运行 `open-health-agent export`，不能改用 openpyxl 反向覆盖真源。
+
+在安装新任务前停用所有旧 cron/launchd/systemd/importer 和任何直接保存 Excel 的 Hermes 路径，正式环境只留一个 OHA writer。完整停写、预演、备份、冲突中止和回滚流程见[旧 Excel / Hermes 单写入迁移清单](migration.md)。
+
+先确认首次说明已经送达并记录有效 `google-health` 同意；工作簿在同步目录时还必须有 `cloud-workbook` 同意。再用同一系统用户、活动 profile、已认证账号、Cloud 项目、IANA 时区和 OHA runtime 完成一次真实手动 `open-health-agent sync`，且 JSON 必须同时明确 `status=success` 与 `workbook_export=succeeded`。`--fixture` 只用于合成测试；fixture、云投影被阻塞的同步或 scheduler 自己的运行都不能作为安装凭据。真实手动同步成功后 **30 分钟内**，取得新的、一次性的 `scheduler` 同意并立即安装：
 
 ```bash
+open-health-agent onboarding grant-consent --scope scheduler
 open-health-agent scheduler install --interval-seconds 3600
 open-health-agent scheduler status
 # 停用并移除本项目的小时任务
 open-health-agent scheduler uninstall
 ```
 
-安装定时任务时会固定当时的 ghealth 活动 profile，并强制 JSON 输出，防止后台环境回落到 default profile 或输出 table/CSV。以后若主动切换 profile，先核对新 profile 的时区，再重新安装 scheduler；更新失败时旧定义会回滚保留。
+`scheduler` 同意是一次性的；任务进入操作系统安装尝试前就会消费它，因此后续安装失败后的重试也需要新的同意。超过 30 分钟、SQLite 中的手工同步证据不匹配或运行时有变化时，先重新真实手动同步，再取得新同意。安装器不会替用户自动完成这些步骤。
+
+安装定义会绑定 `ghealth` 可执行文件、Python runtime、OHA 入口与代码、活动 profile、账号、Cloud 项目、授权 scope/认证方式和时区，并固定 JSON 与 scheduled-only 触发标记。一次性 grant 只允许安装动作；成功后另把 ongoing installed authorization 绑定到最近合格手动同步的静态 runtime 与账号 runtime 两个指纹。每次后台读取健康数据前都会验证 active consent、installed authorization 和指纹；漂移会被拒绝，不会回落到 default profile 或另一个账号/项目。
+
+撤回 scheduler consent 会先让本地运行授权失效，再尝试移除 launchd/systemd 定义；即使删除失败留下孤儿任务，它也无法再次读取健康数据。撤回后单独重新 grant 不会复活孤儿，只有新的合格手动同步和成功重装才能绑定新授权。旧版 OHA plist/service 缺少受管 scheduled 标记、installed authorization 或指纹，必须先 `scheduler uninstall`，再按“真实手动同步 → 新同意 → install”重装，不能手工改旧定义绕过校验。
+
+若 `ghealth` 只有经过本机代理才能访问，在安装命令上显式加 `--inherit-proxy-env`，或从 owner-only 文件读取 `--proxy-env-file <文件>`。只接受 HTTP/HTTPS/ALL/NO_PROXY 白名单；文件在 macOS/Linux 上必须归当前用户所有、权限不宽于 `0600`，除注释/空行外只能出现这些键。HTTP/HTTPS/ALL URL 只能指向 `localhost` 或回环 IP，必须含有效端口，不能有凭据、路径、查询或片段。远程代理、通用 `.env`、token 和其他密钥会被拒绝；状态只显示代理键名。
+
+`scheduler status` 的首次自动运行验收只看 `last_scheduled_sync_status`、`last_scheduled_sync_at`、`last_successful_scheduled_sync_at` 和 `last_scheduled_sync_error_code`；`last_any_*` 可能来自手动同步。`scheduled_trigger_pinned`、`runtime_fingerprint_matches` 和其余定义校验也须通过。`recent_manual_ghealth_sync_eligible` 只表示 30 分钟内的手工证据当前仍可用于一次安装，不代表自动任务已运行。
+
+同步的外部网络 fetch 不应长期占用 writer lock：先短暂持锁固定 consent、配置、日期、profile 和 runtime，释放锁执行 `ghealth` 读取，再重新持锁校验同一授权与身份后才写库。这样微信记录可在网络等待期间继续；若撤权或配置/账号漂移，已抓取批次在落库前整体拒绝。
 
 Linux 使用 systemd user timer；用户退出登录后是否继续运行取决于该用户的 linger 状态。用 `open-health-agent scheduler status` 检查，并仅在理解系统影响时由管理员配置 linger。未启用 linger 时，不要承诺退出登录后仍会同步。
 
@@ -201,12 +234,24 @@ macOS 在完全睡眠时不会持续执行整点任务。插电使用时可到�
 如果选择本项目的 `caffeinate` 适配，只让它在 AC 电源有效，并让用户清楚它会增加耗电；不要默认在电池上阻止睡眠：
 
 ```bash
+open-health-agent onboarding grant-consent --scope keep-awake
 open-health-agent keep-awake-on-ac install
 open-health-agent keep-awake-on-ac status
 open-health-agent keep-awake-on-ac uninstall
 ```
 
+`keep-awake` grant 也是一次性的，只能在授予后 30 分钟内用于一次安装尝试；超时、已消费或安装失败后重试都必须取得新的明确同意。
+
 这不会让合盖或完全睡眠的 Mac 保证执行任务。手机端也不是本仓库的 scheduler 主机：iPhone/Android 负责设备/Google/微信数据入口和查看同步文件，本地 SQLite 与后台任务仍在电脑上运行。
+
+本地同意可以按 scope 撤回；撤回 `scheduler` 时会同时尝试移除受管任务：
+
+```bash
+open-health-agent onboarding revoke-consent --scope scheduler
+open-health-agent onboarding revoke-consent --scope google-health
+```
+
+本地撤回不会自动注销 Google token，也不会替用户关闭 Hermes 中的 Weixin、视觉、语音或其他宿主渠道；撤回 `cloud-workbook` 会阻止后续云投影，但不会删除云端已有工作簿副本或关闭提供商同步。相关外部 provider/host 必须分别撤销、解绑、停用或删除。`scheduler uninstall` 也会撤回 scheduler 同意。
 
 ## 7. Hermes 上下文注意事项
 

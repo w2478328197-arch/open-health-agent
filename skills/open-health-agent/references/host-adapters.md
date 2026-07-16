@@ -13,7 +13,9 @@ A full installation needs the host to:
 5. return images only to a confirmed vision-capable model and audio only to a confirmed STT path;
 6. respect the user's local timezone and data-home path;
 7. keep background scheduling outside the chat session when the host cannot stay alive;
-8. surface missing capability honestly instead of simulating it.
+8. surface missing capability honestly instead of simulating it;
+9. keep health content out of host-global memory and cross-channel user profiles;
+10. pass an opaque inbound message ID as `source_event_id` when available, without embedding sender identity, content, or signed media URLs.
 
 If a host lacks command execution, it may still use the Skill as an explanatory/advice policy, but it cannot claim to have recorded, synced, or read the private ledger.
 
@@ -46,8 +48,13 @@ Hermes is the reference implementation for this repository.
 - Install/configure Hermes using its [official installation guide](https://hermes-agent.nousresearch.com/docs/getting-started/installation).
 - Select a model with `hermes model`. “Login with ChatGPT” means choosing the **OpenAI Codex** provider and completing its OAuth device-code flow; direct `OPENAI_API_KEY` use is the separate `openai-api` provider. See [Hermes provider docs](https://hermes-agent.nousresearch.com/docs/integrations/providers).
 - Connect personal WeChat with `hermes gateway setup` → Weixin. Hermes uses Tencent's iLink Bot API and creates a separate bot identity. Before any health message, replace an open DM policy with pairing/own-user allowlist, disable groups, and verify with non-sensitive content. See [Hermes Weixin docs](https://hermes-agent.nousresearch.com/docs/user-guide/messaging/weixin).
+- Audit every other enabled Hermes platform too. If QQ, Feishu, Discord, Telegram, or another channel can reach terminal/file/skills/memory tools, it must not use allow-all or open group access merely because Weixin itself is paired.
 - Treat Hermes media caches as local sensitive storage. Installed versions may use `~/.hermes/cache/{images,audio,videos,documents}`; verify and clean them explicitly because retention varies and audio/video may persist.
+- Disable health writes to Hermes global memory/USER/MEMORY stores. Health persistence belongs in the private ledger and private `AGENTS.md`; per-sender and per-Skill isolation must be proven before using a shared memory backend.
 - Let the OS scheduler run health sync. The chat gateway and the health importer are separate services and must not become two workbook writers.
+- Never invoke `execute_code`, a generic spreadsheet writer, or an ad-hoc Python script to save managed health sheets. Use the OHA CLI and its shared lock. During migration, stop the legacy writer before allowing the new scheduler or chat writes.
+- Preserve partial-success semantics: when SQLite succeeds but the workbook projection is blocked or pending, report the durable record result and the pending Excel state separately. Do not retry through openpyxl or claim that the record failed; obtain `cloud-workbook` consent or fix export, then run the managed `export` command.
+- Prefer an isolated Hermes health profile/iLink bot with a tool allowlist limited to the OHA wrapper and necessary read-only diagnostics. A shared profile with open channels plus terminal/file/code tools is not an acceptable health boundary.
 
 ### Model and media routing
 
@@ -64,6 +71,8 @@ Do not infer input capability from a provider name. Verify the exact model and r
 | Local/custom endpoint | Model and server dependent | Confirm that both the model and OpenAI-compatible server implement image content; a `*-VL` model is not equivalent to an ordinary text/coding model |
 
 Receiving an image, routing its pixels, and understanding it are separate gates. Voice is separate again: a received audio file is not a transcript. On the locally verified Hermes v0.18.0 path, Weixin audio without an iLink transcript is cached as SILK while the built-in transcription format allowlist does not include SILK. Ask for text unless a tested transcode/custom STT path exists. Re-check this behavior after upgrading Hermes.
+
+Inbound media routing can occur before the Skill is loaded. Do not claim that an explain-first Skill response blocks a first image from reaching the configured model. Make vision consent a gateway/pairing prerequisite and require a text-first opt-in until the gateway can enforce it before media routing. Similarly, a tool call to `onboarding mark-explained` before the outbound reply is only an attempted audit, not delivery proof; use an outbound-success hook or defer marking until the next turn.
 
 The repository scheduler is installed, inspected, and removed with `open-health-agent scheduler install|status|uninstall`. On Linux, inspect the status-reported systemd user `linger` value; without linger, logout may stop the user timer. On macOS, the optional AC-only process uses `open-health-agent keep-awake-on-ac install|status|uninstall` and does not guarantee operation during lid-closed/full sleep.
 

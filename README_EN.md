@@ -305,7 +305,7 @@ The installer puts the command in `~/.local/bin` by default. If the current term
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-This affects only the current terminal. To keep it, add the same line to `~/.zshrc` or `~/.bashrc`; alternatively, always use the complete `Command:` prefix printed by the installer. Background launchd/systemd services normally do not read interactive shell startup files, so do not rely on a temporary `PATH`, `~`, or `$HOME` expansion in a service definition. For background configuration and Agent troubleshooting, copy the installer's complete absolute `Command:` (for example, `/Users/your-name/.local/bin/open-health-agent`). An interactive terminal success does not replace a live WeChat test.
+This affects only the current terminal. To keep it, add the same line to `~/.zshrc` or `~/.bashrc`; alternatively, always use the complete `Command:` prefix printed by the installer. Background launchd/systemd services normally do not read interactive shell startup files, so do not rely on a temporary `PATH`, `~`, or `$HOME` expansion in a service definition. For background configuration and Agent troubleshooting, copy the installer's complete absolute `Command:`. An interactive terminal success does not replace a live WeChat test.
 
 After every OHA Skill install or update, restart the Hermes gateway so the background process reloads the Skill and command, then verify its status:
 
@@ -337,10 +337,34 @@ After confirming that the explanation was actually delivered, record its local a
 
 ```bash
 open-health-agent onboarding status
-open-health-agent onboarding mark-explained
+open-health-agent onboarding mark-explained --delivery-confirmed
 ```
 
 This timestamp is installation audit information. It never allows the Agent to skip the first-use explanation in a future new conversation.
+
+If the workbook is in iCloud, OneDrive, Dropbox, or another recognized synchronization folder, obtain separate cloud-workbook consent before any health-bearing Excel projection:
+
+```bash
+open-health-agent onboarding grant-consent --scope cloud-workbook
+```
+
+An ordinary local workbook does not need this scope. Without it, records, goals, deletes, and syncs may still commit successfully to SQLite, but health data is not projected into the cloud workbook. Commands report `*_export_pending` or `workbook_export=blocked_by_consent`, and `context`/`doctor` report a pending projection. After consent, run `open-health-agent export` to rebuild Excel from SQLite. To make a Google foreground sync qualify for scheduler installation, grant cloud-workbook consent first and complete a new real sync; exporting afterward does not retroactively qualify the earlier sync.
+
+`cloud-workbook` and `cloud-private-home` are independent scopes, each bound to the exact provider/path fingerprint. A new private home must use ordinary local storage. When upgrading a legacy installation whose private home or SQLite database already lives in iCloud, OneDrive, Dropbox, or another synchronized directory, health writes pause until the private home is migrated back to local storage or the user explicitly grants legacy continuation for that current synchronized location:
+
+```bash
+open-health-agent onboarding grant-consent --scope cloud-private-home
+```
+
+Moving the private home, database, or workbook, or switching sync providers, invalidates the old cloud scope. Revoking a scope does not delete provider-side copies or disable operating-system synchronization. Even with `cloud-private-home`, projecting the workbook to a cloud folder still requires separate `cloud-workbook` consent.
+
+If Google Health will be connected next, first obtain the user's explicit consent for that external data path and record its scope:
+
+```bash
+open-health-agent onboarding grant-consent --scope google-health
+```
+
+This local consent record does not sign into Google, change OAuth permissions, or install a background job. The command refuses consent when explanation delivery has not been confirmed. The repository installer also **never installs the scheduler automatically**.
 
 ### 4. Connect Google Health on the phone
 
@@ -413,28 +437,40 @@ open-health-agent sync
 open-health-agent context
 ```
 
+Synchronization uses a two-phase lock design. It briefly holds the writer lock only for local consent, configuration, date-range, and local runtime preflight checks. Potentially slow `ghealth` profile, account, timezone, fingerprint, and network calls run outside the writer lock. After fetching, OHA rechecks external identity outside the lock, then briefly reacquires the lock to confirm local authority, configuration, dates, and fingerprints still match before writing SQLite. Network waits and external validation therefore do not monopolize manual WeChat logging. If consent, configuration, or identity changes while the fetch is in flight, the whole fetched batch is rejected before persistence and must be retried.
+
 Check all four points:
 
 - Local ledger checks pass in `doctor`. Before a scheduler is enabled, some `ghealth` checks remain optional, so an overall `ok` alone does not prove that the wearable path works.
 - `ghealth auth status --validate` and the small current-day step query genuinely pass.
-- Inspect `status`, `errors`, and counts in the `sync` JSON. Individual metric queries may fail even when the process exits normally. Only `status=success` means complete success. `partial`, `failed`, and `empty` must be investigated; missing values cannot become zero.
+- Inspect `status`, `workbook_export`, `errors`, and counts in the `sync` JSON. Individual metric queries may fail even when the process exits normally. Complete acceptance requires both `status=success` and `workbook_export=succeeded`. Investigate `partial`, `failed`, `empty`, and `blocked_by_consent`; missing values cannot become zero, and a SQLite-only result cannot authorize scheduler installation.
 - Excel contains managed sheets for daily health, workouts, measurements, food logs, daily nutrition summaries, goal history, synchronization logs, and related views.
 
 `open-health-agent context` is the standard “read the health table” operation before advice. It reads SQLite, the same source that generates Excel; it does not ask the model to guess from or freely edit arbitrary `.xlsx` cells.
 
 ### 7. Enable hourly synchronization and AC-power wakefulness
 
-Install the hourly job only after `open-health-agent sync` has been run manually as the **same operating-system user, with the same Google profile and timezone**, and its JSON explicitly reports `status=success`. A zero process exit code or an overall `doctor` result of `ok` does not replace this acceptance check. Then obtain the user's explicit consent for background operation:
+If the machine already has a cron, launchd/systemd job, legacy importer, or Hermes/openpyxl path that saves the health workbook directly, first follow the [one-writer migration checklist](docs/migration.md) to inventory, stop, back up, and cut over those writers. Do not install a new job while dual writing may still occur.
+
+Install the hourly job only after explanation delivery is confirmed, active `google-health` consent is recorded, and a real `open-health-agent sync` has run as the **same operating-system user, with the same Google profile, authenticated account, Cloud project, timezone, and OHA runtime**. Its JSON must explicitly report `status=success`. `--fixture` exists only for synthetic tests; neither a fixture sync nor a scheduled run can create installation evidence. A zero process exit code or an overall `doctor` result of `ok` does not replace this real foreground acceptance check.
+
+Within **30 minutes** after that successful real manual sync, obtain a fresh one-shot `scheduler` consent and install immediately:
 
 ```bash
-open-health-agent onboarding grant-consent
+open-health-agent onboarding grant-consent --scope scheduler
 open-health-agent scheduler install --interval-seconds 3600
 open-health-agent scheduler status
 ```
 
-The installer resolves and stores the absolute `ghealth`, Python, and OHA entry-point paths plus the active profile, so the job does not depend on an interactive shell's temporary `PATH`. If those files are moved/reinstalled, the `ghealth` profile changes, or the timezone changes, first complete another successful manual `sync` and then rerun `scheduler install` to refresh the definition.
+Scheduler consent is one-shot: it is consumed before the operating-system job mutation begins. If that later installation step fails, a retry still needs fresh consent. If the 30-minute window expires, the SQLite evidence no longer matches, or the runtime changes, complete another real manual sync and obtain a new consent. The repository installer performs none of these actions on the user's behalf.
 
-Immediately after installation, `status` proves only that the job definition and service exist; it does not prove an automatic sync. Before installing, note the latest timestamp in Excel's synchronization log. After installing, do not trigger another manual `sync`: keep the installing user signed in, the computer awake, and the network available until a log entry appears **after the installation time**. Run `scheduler status` and `open-health-agent context` again, and confirm that the new row also has `status=success`. Only then has the first automatic run passed acceptance.
+The scheduler binds the `ghealth` executable, Python runtime, OHA entry point and code, active profile, authenticated account, Cloud project, granted scopes/authentication method, and IANA timezone. It also writes a managed scheduled-only marker. The one-shot grant approves only the installation action; after a successful install, OHA separately binds ongoing runtime authorization to the qualifying foreground sync's static-runtime fingerprint plus account-bound runtime fingerprint. Every background run verifies active consent, that installed authorization, and both opaque fingerprints before any health query; drift is rejected instead of silently falling back to another profile, account, project, or code version.
+
+Revocation invalidates runtime authorization in durable local state before OHA attempts to remove the operating-system job. Therefore, even if job removal fails and leaves an orphan definition, it cannot continue fetching health data. Granting scheduler consent again after revocation does not resurrect that orphan; a new qualifying real manual sync and successful reinstall are required to create new installed authorization. Older OHA jobs lack these fields and must be removed with `open-health-agent scheduler uninstall`, followed by “real manual sync → fresh one-shot consent → install.” Do not hand-edit an old plist or service to make it appear current.
+
+If a manual sync succeeds only through a local proxy, explicitly give the background definition the same route. Add `--inherit-proxy-env` to copy only allowlisted HTTP/HTTPS/ALL/NO_PROXY variables from the install process, or use `--proxy-env-file <owner-only-file>`. On macOS/Linux that file must be owned by the current user, owner-readable only, and contain only those proxy keys apart from comments or blank lines. Each HTTP/HTTPS/ALL proxy URL must target `localhost` or a loopback IP, include a valid port, and contain no credentials, path, query, or fragment. Remote proxies and general-purpose `.env` files are rejected. `scheduler status` reports only key names, never addresses or values. Omit both options when no proxy is required.
+
+Immediately after installation, `status` proves only that the job definition and service exist; it does not prove an automatic sync. Before installing, note the latest timestamp in Excel's synchronization log. After installing, do not trigger another manual `sync`: keep the installing user signed in, the computer awake, and the network available until a log entry appears **after the installation time**. Run `scheduler status` and `open-health-agent context` again. Use `last_scheduled_sync_status`, `last_scheduled_sync_at`, `last_successful_scheduled_sync_at`, and `last_scheduled_sync_error_code` for acceptance; `last_any_*` may describe a manual sync and cannot prove an automatic run. `scheduled_trigger_pinned`, `runtime_fingerprint_matches`, and the other configuration checks must also pass. `recent_manual_ghealth_sync_eligible` only says that current foreground evidence can still authorize one install; it does not mean the scheduler has run.
 
 The Hermes gateway and health scheduler are two separate services:
 
@@ -443,18 +479,21 @@ The Hermes gateway and health scheduler are two separate services:
 
 Both must run as the same trusted operating-system user. Disable any old cron job, importer, or second Excel writer.
 
-This is an approximately every-3600-seconds schedule, not a promise to run exactly at the top of each clock hour. Network loss, sleep, expired OAuth, and upstream delay may cause failure, partial success, or latency; a failure is never relabeled as success, and the service tries again at a later interval. After restoring network/authorization, verify a manual `sync`, rerun `scheduler install` if needed, and repeat the automatic-run acceptance above. Later jobs deliberately use an **overlapping data lookback window** to recover late data and deduplicate it; this is not permission to run two schedulers or two Excel writers.
+This is an approximately every-3600-seconds schedule, not a promise to run exactly at the top of each clock hour. Network loss, sleep, expired OAuth, and upstream delay may cause failure, partial success, or latency; a failure is never relabeled as success, and the service tries again at a later interval. After restoring network/authorization, verify a real manual `sync`. If the job actually needs reinstalling, obtain fresh one-shot `scheduler` consent and run `install` within 30 minutes of that success, then repeat the automatic-run acceptance above. Later jobs deliberately use an **overlapping data lookback window** to recover late data and deduplicate it; this is not permission to run two schedulers or two Excel writers.
 
-macOS launchd and the Linux systemd user timer belong to the user who installed them. A macOS user job normally runs only after that user signs in. After an operating-system reboot, sign in, check both `hermes gateway status` and `open-health-agent scheduler status`, and wait for a new automatic-sync record. Restart the Hermes gateway if it did not recover. If the scheduler definition or absolute paths no longer match, complete a manual sync and reinstall the scheduler.
+macOS launchd and the Linux systemd user timer belong to the user who installed them. A macOS user job normally runs only after that user signs in. After an operating-system reboot, sign in, check both `hermes gateway status` and `open-health-agent scheduler status`, and wait for a new automatic-sync record. Restart the Hermes gateway if it did not recover. If the scheduler definition or runtime fingerprint no longer matches, the old job refuses health queries; uninstall it, then follow “real manual sync → fresh one-shot consent → install.”
 
 This version does not send an OAuth-expiry alert. While Google Cloud remains in Testing, run `ghealth auth status --validate` and `open-health-agent scheduler status` at least weekly. Investigate whenever the last successful synchronization is older than two configured intervals—about two hours for the hourly schedule—instead of discovering a stale ledger days later.
 
 A fully sleeping Mac will not continuously execute hourly jobs. When plugged in, go to **System Settings → Battery → Options** and enable the option that prevents automatic sleep on the power adapter while the display is off, and keep a MacBook open. Or use the project's reversible AC-only helper:
 
 ```bash
+open-health-agent onboarding grant-consent --scope keep-awake
 open-health-agent keep-awake-on-ac install
 open-health-agent keep-awake-on-ac status
 ```
+
+Like scheduler consent, a `keep-awake` grant is one-shot and can be used for only one installation attempt within 30 minutes after it is granted. Expiry, prior consumption, or a failed install requires new user consent. It does not authorize Google, the scheduler, or a cloud workbook.
 
 It prevents idle system sleep only while connected to AC power and does not guarantee operation with a closed lid. Remove it and the scheduler with:
 
@@ -464,6 +503,15 @@ open-health-agent scheduler uninstall
 ```
 
 Linux uses a systemd user timer. Whether it continues after logout depends on user linger; trust the result of `scheduler status`, not an assumption.
+
+Withdraw a local permission with its explicit scope. Revoking `scheduler` also attempts to remove the managed job:
+
+```bash
+open-health-agent onboarding revoke-consent --scope scheduler
+open-health-agent onboarding revoke-consent --scope google-health
+```
+
+Local revocation prevents OHA from using that capability, but it does not revoke the Google-side token or disable Hermes Weixin, vision, speech, or another host channel. Revoking `cloud-workbook` stops later cloud projections but does not delete an existing provider copy or disable synchronization. Disable, revoke, or delete each external provider/host artifact separately. `open-health-agent scheduler uninstall` also revokes scheduler consent.
 
 ## First end-to-end acceptance test in WeChat
 
@@ -502,7 +550,8 @@ When the user has already requested installation, synchronization, or logging, c
 
 ```text
 New user goal → save exact wording and safety constraint
-New user data / new ghealth data → write SQLite → export Excel
+New user data / new ghealth data → persist workbook-projection outbox marker
+                                 → write SQLite → export Excel with consent → clear pending marker
 Advice requested → open-health-agent context
                  → inspect cutoff, freshness, missing data, and day completeness
                  → advise under the goal and safety constraints
@@ -550,7 +599,8 @@ See [health rules](skills/open-health-agent/references/health-rules.md) for calc
 - A blood-pressure monitor, glucose meter, grip-strength device, waist measurement, or another metric not connected to Google Health can enter the measurement ledger through WeChat text, a trustworthy voice transcript, a readable instrument photo, or CLI.
 - To affect advice, a custom metric must be written as a structured Agent/CLI record. Ordinary sheets that the user adds to Excel are preserved where possible but do not automatically enter context or recommendations.
 - Managed health sheets are not a second write source. Ask the Agent to update the original record and re-export when correcting data.
-- When using iCloud, synchronize only the Excel view. Keep SQLite, `AGENTS.md`, OAuth tokens, photos, and logs in the private local directory.
+- Before any operation can durably change SQLite, it persists a workbook-projection outbox marker. Only a successful atomic Excel export clears that marker after the database commit. A crash, file lock, permission error, or missing `cloud-workbook` consent leaves a recoverable pending state instead of rolling back or hiding the successful canonical write; resolve the cause and run `open-health-agent export` to rebuild the view.
+- When using iCloud, synchronize only the Excel view and explicitly grant `cloud-workbook` before its first health-bearing projection. Keep SQLite, `AGENTS.md`, OAuth tokens, photos, and logs in the private local directory. If a legacy installation already has its private home in a synchronized folder, `cloud-private-home` is only a temporary exact-bound legacy authorization; prefer migrating it back to local storage.
 - The default private directory is `~/.open-health-agent`. On supported systems the installer applies owner-only directory and file permissions, but SQLite and configuration are not encrypted at rest by the project. Enable FileVault, LUKS, or equivalent full-disk encryption and secure the operating-system account.
 - Close Excel/Numbers during the first synchronization, migration, or repair so it and iCloud do not become another writer. Normal viewing is fine, but do not directly edit values in managed health sheets. An iCloud conflict copy is not a substitute for the SQLite source of truth.
 
@@ -558,7 +608,9 @@ See the [ledger specification](skills/open-health-agent/references/ledger-schema
 
 ### Backup and decommissioning
 
-Version 0.1.0 does not provide one-command encrypted backup. Before backing up the SQLite source, stop the Hermes gateway and run `open-health-agent scheduler uninstall`. After confirming there are no writers, copy the entire `~/.open-health-agent` directory into a controlled encrypted backup location. An iCloud Excel backup alone cannot restore the audit state. After restoration, run `open-health-agent doctor`, `export`, and `context` before re-enabling services.
+Before each sync, record, delete, or goal change, the CLI uses SQLite's online backup API under the shared lock and keeps the configured bounded retention (14 snapshots by default). Run `open-health-agent backup` for a manual consistent snapshot; its default response hides the local path, while `--verbose-path` is reserved for terminal diagnostics. These snapshots are permission-restricted but are not independently encrypted.
+
+For a complete encrypted recovery copy, still stop the Hermes gateway, uninstall the scheduler, and confirm that no other writer remains before copying the entire private data directory into controlled encrypted storage. An Excel-only cloud copy cannot restore audit state. After restoration, run `doctor`, `export`, and `context` before re-enabling services.
 
 To decommission completely, run:
 
@@ -601,7 +653,9 @@ This optional route requires Node.js/npm on the host. It does not install the Py
 - [ ] Images and voice have each passed a real capability test.
 - [ ] The Google Health phone app shows every target metric.
 - [ ] `ghealth auth status --validate` passes, and OHA and `ghealth` use the same timezone.
-- [ ] The scheduler is installed only after a successful manual `open-health-agent sync`.
+- [ ] A synchronized workbook has separate exact-bound `cloud-workbook` consent; if a legacy private home is synchronized, it has been migrated local or separately granted exact-bound `cloud-private-home`; `doctor`/`context` shows no pending workbook projection.
+- [ ] Explanation delivery and `google-health` consent are recorded; within 30 minutes of a successful real manual `open-health-agent sync`, the scheduler is installed with fresh one-shot consent.
+- [ ] Scheduler status shows active consent and matching static/account runtime fingerprints, and the first scheduled success exercises installed authorization; an orphan cannot run after revocation.
 - [ ] `open-health-agent context` reports cutoff, freshness, goals, and data gaps.
 - [ ] Goal, blood pressure, workout, and meal-photo records are visible in Excel.
 - [ ] Shopping, menus, and plans are not mistaken for consumed food; repeated sync does not create duplicate rows.
@@ -610,7 +664,8 @@ This optional route requires Node.js/npm on the host. It does not install the Py
 ## Documentation and privacy
 
 - [Hermes, model, and WeChat configuration](docs/hermes.md)
-- [Complete installation and migration](skills/open-health-agent/references/installation.md)
+- [Complete installation and onboarding](skills/open-health-agent/references/installation.md)
+- [Legacy Excel / Hermes one-writer migration checklist (Chinese)](docs/migration.md)
 - [Data sources and OAuth](skills/open-health-agent/references/data-sources.md)
 - [Architecture and consistency](docs/architecture.md)
 - [Compatibility](docs/compatibility.md)
