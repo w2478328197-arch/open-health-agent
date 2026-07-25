@@ -2245,27 +2245,28 @@ def _profile_schema_status(path: Path) -> dict[str, Any]:
 
 
 def _sync_storage_provider(path: Path) -> str | None:
+    # Normalize both POSIX and Windows paths before matching.  Tests may build
+    # synthetic cloud paths on a host whose native separator differs from the
+    # path convention named by the provider.
     candidates = {
-        str(path.expanduser()).casefold(),
-        str(path.expanduser().resolve()).casefold(),
+        str(path.expanduser()).casefold().replace("\\", "/"),
+        str(path.expanduser().resolve()).casefold().replace("\\", "/"),
     }
     markers = (
         ("icloud", ("library/mobile documents", "com~apple~clouddocs")),
-        ("OneDrive", ("/onedrive", "\\onedrive")),
-        ("Dropbox", ("/dropbox", "\\dropbox")),
+        ("OneDrive", ("/onedrive",)),
+        ("Dropbox", ("/dropbox",)),
         (
             "Google Drive",
             (
                 "/google drive",
-                "\\google drive",
                 "/my drive",
                 "/googledrive-",
-                "\\googledrive-",
             ),
         ),
         (
             "Box",
-            ("/box/", "\\box\\", "/box sync", "/box-", "\\box-"),
+            ("/box/", "/box sync", "/box-"),
         ),
     )
     for provider, fragments in markers:
