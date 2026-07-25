@@ -217,8 +217,11 @@ def points(payload: Any) -> list[dict[str, Any]]:
         return [row for row in payload if isinstance(row, dict)]
     if not isinstance(payload, dict):
         return []
-    rows = payload.get("dataPoints")
-    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+    for key in ("dataPoints", "rollupDataPoints"):
+        rows = payload.get(key)
+        if isinstance(rows, list):
+            return [row for row in rows if isinstance(row, dict)]
+    return []
 
 
 @dataclass(frozen=True)
@@ -227,24 +230,280 @@ class QuerySpec:
     data_type: str
     operation: str
     detail: bool = False
+    page_size: int | None = None
+    max_days: int | None = None
+    use_date_range: bool = True
+    include_to: bool = True
+    grain: str = "semantic"
 
 
 QUERY_SPECS = (
-    QuerySpec("steps", "steps", "daily-rollup"),
-    QuerySpec("distance", "distance", "daily-rollup"),
-    QuerySpec("active_energy", "active-energy-burned", "daily-rollup"),
-    QuerySpec("active_minutes", "active-minutes", "daily-rollup"),
-    QuerySpec("rhr", "daily-resting-heart-rate", "list"),
-    QuerySpec("hrv", "daily-heart-rate-variability", "list"),
-    QuerySpec("spo2", "daily-oxygen-saturation", "list"),
-    QuerySpec("respiratory", "daily-respiratory-rate", "list"),
-    QuerySpec("vo2", "daily-vo2-max", "list"),
-    QuerySpec("weight", "weight", "list"),
-    QuerySpec("body_fat", "body-fat", "list"),
-    QuerySpec("height", "height", "list"),
-    QuerySpec("sleep", "sleep", "list", True),
-    QuerySpec("exercise", "exercise", "list"),
+    QuerySpec("steps", "steps", "daily-rollup", max_days=90),
+    QuerySpec("distance", "distance", "daily-rollup", max_days=90),
+    QuerySpec(
+        "active_energy", "active-energy-burned", "daily-rollup", max_days=90
+    ),
+    QuerySpec("active_minutes", "active-minutes", "daily-rollup", max_days=14),
+    QuerySpec("rhr", "daily-resting-heart-rate", "list", page_size=10_000),
+    QuerySpec(
+        "hrv", "daily-heart-rate-variability", "list", page_size=10_000
+    ),
+    QuerySpec("spo2", "daily-oxygen-saturation", "list", page_size=10_000),
+    QuerySpec(
+        "respiratory", "daily-respiratory-rate", "list", page_size=10_000
+    ),
+    QuerySpec("vo2", "daily-vo2-max", "list", page_size=10_000),
+    QuerySpec("weight", "weight", "list", page_size=10_000),
+    QuerySpec("body_fat", "body-fat", "list", page_size=10_000),
+    QuerySpec("height", "height", "list", page_size=10_000),
+    QuerySpec("sleep", "sleep", "list", True, page_size=25),
+    QuerySpec("exercise", "exercise", "list", page_size=25),
 )
+
+
+# Full, lossless-at-the-ghealth-JSON-layer capture.  The 14 semantic queries
+# above still feed the stable daily/measurement/workout views.  These specs
+# independently preserve every personal or reference data type exposed by the
+# pinned ghealth registry.  For interval types whose list response omits the
+# metric value (steps, distance, swim lengths), retain both the interval stream
+# and a daily value series. Active energy also retains both its granular stream
+# and the daily series used by the semantic layer.
+CAPTURE_SPECS = (
+    QuerySpec("capture_steps_intervals", "steps", "list", page_size=10_000, grain="interval"),
+    QuerySpec("capture_steps_daily", "steps", "daily-rollup", max_days=90, grain="daily"),
+    QuerySpec("capture_heart_rate", "heart-rate", "list", page_size=10_000, grain="sample"),
+    QuerySpec("capture_exercise", "exercise", "list", page_size=25, grain="session"),
+    QuerySpec("capture_sleep", "sleep", "list", True, page_size=25, grain="session"),
+    QuerySpec("capture_weight", "weight", "list", page_size=10_000, grain="sample"),
+    QuerySpec("capture_body_fat", "body-fat", "list", page_size=10_000, grain="sample"),
+    QuerySpec("capture_height", "height", "list", page_size=10_000, grain="sample"),
+    QuerySpec("capture_distance_intervals", "distance", "list", page_size=10_000, grain="interval"),
+    QuerySpec("capture_distance_daily", "distance", "daily-rollup", max_days=90, grain="daily"),
+    QuerySpec(
+        "capture_hrv",
+        "heart-rate-variability",
+        "list",
+        page_size=10_000,
+        grain="sample",
+    ),
+    QuerySpec(
+        "capture_oxygen_saturation",
+        "oxygen-saturation",
+        "list",
+        page_size=10_000,
+        grain="sample",
+    ),
+    QuerySpec("capture_altitude", "altitude", "list", page_size=10_000, grain="interval"),
+    QuerySpec(
+        "capture_active_zone_minutes",
+        "active-zone-minutes",
+        "list",
+        page_size=10_000,
+        grain="interval",
+    ),
+    QuerySpec(
+        "capture_activity_level",
+        "activity-level",
+        "list",
+        page_size=10_000,
+        grain="interval",
+    ),
+    QuerySpec(
+        "capture_basal_energy",
+        "basal-energy-burned",
+        "list",
+        page_size=10_000,
+        grain="interval",
+    ),
+    QuerySpec(
+        "capture_active_energy",
+        "active-energy-burned",
+        "list",
+        page_size=10_000,
+        grain="interval",
+    ),
+    QuerySpec(
+        "capture_active_energy_daily",
+        "active-energy-burned",
+        "daily-rollup",
+        max_days=90,
+        grain="daily",
+    ),
+    QuerySpec("capture_vo2_max", "vo2-max", "list", page_size=10_000, grain="sample"),
+    QuerySpec(
+        "capture_total_calories",
+        "total-calories",
+        "daily-rollup",
+        max_days=14,
+        grain="daily",
+    ),
+    QuerySpec(
+        "capture_sedentary_period",
+        "sedentary-period",
+        "list",
+        page_size=10_000,
+        grain="interval",
+    ),
+    QuerySpec(
+        "capture_swim_intervals",
+        "swim-lengths-data",
+        "list",
+        page_size=10_000,
+        grain="interval",
+    ),
+    QuerySpec(
+        "capture_swim_daily",
+        "swim-lengths-data",
+        "daily-rollup",
+        max_days=90,
+        grain="daily",
+    ),
+    QuerySpec(
+        "capture_hydration",
+        "hydration-log",
+        "list",
+        page_size=10_000,
+        grain="event",
+    ),
+    QuerySpec(
+        "capture_nutrition",
+        "nutrition-log",
+        "list",
+        page_size=10_000,
+        grain="event",
+    ),
+    QuerySpec(
+        "capture_food_catalog",
+        "food",
+        "list",
+        page_size=10_000,
+        use_date_range=False,
+        grain="reference",
+    ),
+    QuerySpec(
+        "capture_food_units",
+        "food-measurement-unit",
+        "list",
+        page_size=10_000,
+        use_date_range=False,
+        grain="reference",
+    ),
+    QuerySpec(
+        "capture_blood_glucose",
+        "blood-glucose",
+        "list",
+        page_size=10_000,
+        grain="sample",
+    ),
+    QuerySpec(
+        "capture_core_temperature",
+        "core-body-temperature",
+        "list",
+        page_size=10_000,
+        grain="sample",
+    ),
+    QuerySpec(
+        "capture_ecg",
+        "electrocardiogram",
+        "list",
+        page_size=25,
+        include_to=False,
+        grain="waveform",
+    ),
+    QuerySpec(
+        "capture_irregular_rhythm",
+        "irregular-rhythm-notification",
+        "list",
+        page_size=10_000,
+        grain="alert",
+    ),
+    QuerySpec(
+        "capture_daily_resting_hr",
+        "daily-resting-heart-rate",
+        "list",
+        page_size=10_000,
+        grain="daily",
+    ),
+    QuerySpec(
+        "capture_daily_hrv",
+        "daily-heart-rate-variability",
+        "list",
+        page_size=10_000,
+        grain="daily",
+    ),
+    QuerySpec(
+        "capture_daily_spo2",
+        "daily-oxygen-saturation",
+        "list",
+        page_size=10_000,
+        grain="daily",
+    ),
+    QuerySpec(
+        "capture_daily_respiratory",
+        "daily-respiratory-rate",
+        "list",
+        page_size=10_000,
+        grain="daily",
+    ),
+    QuerySpec(
+        "capture_daily_vo2",
+        "daily-vo2-max",
+        "list",
+        page_size=10_000,
+        grain="daily",
+    ),
+    QuerySpec(
+        "capture_daily_sleep_temperature",
+        "daily-sleep-temperature-derivations",
+        "list",
+        page_size=10_000,
+        grain="daily",
+    ),
+    QuerySpec(
+        "capture_sleep_respiratory",
+        "respiratory-rate-sleep-summary",
+        "list",
+        page_size=10_000,
+        grain="sample",
+    ),
+    QuerySpec(
+        "capture_run_vo2",
+        "run-vo2-max",
+        "list",
+        page_size=10_000,
+        grain="sample",
+    ),
+    QuerySpec("capture_floors", "floors", "daily-rollup", max_days=90, grain="daily"),
+    QuerySpec(
+        "capture_active_minutes",
+        "active-minutes",
+        "daily-rollup",
+        max_days=14,
+        grain="daily",
+    ),
+    QuerySpec(
+        "capture_time_in_hr_zone",
+        "time-in-heart-rate-zone",
+        "daily-rollup",
+        max_days=90,
+        grain="daily",
+    ),
+    QuerySpec(
+        "capture_calories_in_hr_zone",
+        "calories-in-heart-rate-zone",
+        "daily-rollup",
+        max_days=14,
+        grain="daily",
+    ),
+    QuerySpec(
+        "capture_daily_hr_zones",
+        "daily-heart-rate-zones",
+        "reconcile",
+        grain="daily",
+    ),
+)
+
+SUPPORTED_CAPTURE_DATA_TYPES = frozenset(spec.data_type for spec in CAPTURE_SPECS)
 
 
 # A failed ghealth query may affect only a subset of the composite daily row.
@@ -509,12 +768,36 @@ class GHealthAdapter:
             f"ghealth config set timezone {self.timezone_name} for the active profile, then run doctor again"
         )
 
-    def query(self, spec: QuerySpec, start: str, end: str) -> list[dict[str, Any]]:
-        base = ["data", spec.data_type, spec.operation, "--from", start, "--to", end]
+    @staticmethod
+    def _date_windows(
+        start: str, end: str, max_days: int | None
+    ) -> list[tuple[str, str]]:
+        if max_days is None:
+            return [(start, end)]
+        first = date.fromisoformat(start)
+        last = date.fromisoformat(end)
+        if last < first:
+            raise GHealthError("ghealth query end date is before its start date")
+        windows: list[tuple[str, str]] = []
+        cursor = first
+        while cursor <= last:
+            window_end = min(cursor + timedelta(days=max_days - 1), last)
+            windows.append((cursor.isoformat(), window_end.isoformat()))
+            cursor = window_end + timedelta(days=1)
+        return windows
+
+    def _query_window(
+        self, spec: QuerySpec, start: str, end: str
+    ) -> list[dict[str, Any]]:
+        base = ["data", spec.data_type, spec.operation]
+        if spec.use_date_range:
+            base.extend(["--from", start])
+            if spec.include_to:
+                base.extend(["--to", end])
         if spec.detail:
             base.append("--detail")
         if spec.operation == "list":
-            base.extend(["--limit", "500"])
+            base.extend(["--limit", str(spec.page_size or 10_000)])
         collected: list[dict[str, Any]] = []
         page_token: str | None = None
         for _ in range(MAX_PAGES):
@@ -524,13 +807,38 @@ class GHealthAdapter:
             payload = self.runner.run(arguments)
             collected.extend(points(payload))
             next_token = payload.get("nextPageToken")
-            if not isinstance(next_token, str) or not next_token or spec.operation != "list":
+            if (
+                not isinstance(next_token, str)
+                or not next_token
+                or spec.operation != "list"
+            ):
                 break
             if next_token == page_token:
                 raise GHealthError(f"pagination token repeated for {spec.data_type}")
             page_token = next_token
         else:
-            raise GHealthError(f"pagination exceeded {MAX_PAGES} pages for {spec.data_type}")
+            raise GHealthError(
+                f"pagination exceeded {MAX_PAGES} pages for {spec.data_type}"
+            )
+        if spec.use_date_range and not spec.include_to:
+            # ECG accepts only a lower-bound provider filter. Enforce the
+            # caller's upper bound locally so a historical sync cannot import
+            # observations outside its requested range.
+            collected = [
+                point
+                for point in collected
+                if (direct_date(point, timezone_name=self.timezone_name) or end) <= end
+            ]
+        return collected
+
+    def query(self, spec: QuerySpec, start: str, end: str) -> list[dict[str, Any]]:
+        if not spec.use_date_range:
+            return self._query_window(spec, start, end)
+        collected: list[dict[str, Any]] = []
+        for window_start, window_end in self._date_windows(
+            start, end, spec.max_days
+        ):
+            collected.extend(self._query_window(spec, window_start, window_end))
         return collected
 
     def fetch(self, start: str, end: str, batch_id: str) -> dict[str, Any]:
@@ -538,20 +846,113 @@ class GHealthAdapter:
         raw: dict[str, list[dict[str, Any]]] = {}
         errors: list[str] = []
         failed_query_keys: list[str] = []
+        cache: dict[
+            tuple[str, str, bool, int | None, int | None, bool, bool],
+            list[dict[str, Any]] | GHealthError,
+        ] = {}
+
+        def cached_query(spec: QuerySpec) -> list[dict[str, Any]]:
+            cache_key = (
+                spec.data_type,
+                spec.operation,
+                spec.detail,
+                spec.page_size,
+                spec.max_days,
+                spec.use_date_range,
+                spec.include_to,
+            )
+            cached = cache.get(cache_key)
+            if isinstance(cached, GHealthError):
+                raise cached
+            if cached is not None:
+                return cached
+            try:
+                queried = self.query(spec, start, end)
+            except GHealthError as exc:
+                cache[cache_key] = exc
+                raise
+            cache[cache_key] = queried
+            return queried
+
         for spec in QUERY_SPECS:
             try:
-                raw[spec.key] = self.query(spec, start, end)
+                raw[spec.key] = cached_query(spec)
             except GHealthError as exc:
                 raw[spec.key] = []
                 failed_query_keys.append(spec.key)
                 errors.append(f"{spec.key}: {redact(str(exc))}")
+        captured: list[tuple[QuerySpec, list[dict[str, Any]]]] = []
+        capture_errors: list[str] = []
+        capture_outcomes: dict[str, list[tuple[QuerySpec, bool, int]]] = defaultdict(
+            list
+        )
+        for spec in CAPTURE_SPECS:
+            try:
+                rows = cached_query(spec)
+                captured.append((spec, rows))
+                capture_outcomes[spec.data_type].append((spec, True, len(rows)))
+            except GHealthError as exc:
+                capture_errors.append(f"{spec.key}: {redact(str(exc))}")
+                capture_outcomes[spec.data_type].append((spec, False, 0))
         normalized = normalize_payloads(
             raw,
             batch_id,
             self.sleep_source_priority,
             self.timezone_name,
         )
-        normalized["errors"] = errors
+        wearable, wearable_data_until = normalize_wearable_payloads(
+            captured, batch_id, self.timezone_name
+        )
+        normalized["wearable"] = wearable
+        normalized["wearable_data_until"] = wearable_data_until
+        combined_cutoffs = [
+            cutoff
+            for value in (normalized.get("data_until"), wearable_data_until)
+            if (cutoff := aware_datetime(value, self.timezone_name)) is not None
+        ]
+        normalized["data_until"] = (
+            utc_iso(max(combined_cutoffs)) if combined_cutoffs else None
+        )
+        coverage_imported_at = utc_now()
+        capture_coverage: list[dict[str, Any]] = []
+        for data_type in sorted(SUPPORTED_CAPTURE_DATA_TYPES):
+            outcomes = capture_outcomes[data_type]
+            successes = sum(1 for _, succeeded, _ in outcomes if succeeded)
+            status = (
+                "success"
+                if successes == len(outcomes)
+                else "partial"
+                if successes
+                else "failed"
+            )
+            capture_coverage.append(
+                {
+                    "record_id": stable_record_id(
+                        "wearable_coverage", [data_type]
+                    ),
+                    "data_type": data_type,
+                    "operations": sorted({spec.operation for spec, _, _ in outcomes}),
+                    "grains": sorted({spec.grain for spec, _, _ in outcomes}),
+                    "status": status,
+                    "query_count": len(outcomes),
+                    "successful_query_count": successes,
+                    "failed_query_count": len(outcomes) - successes,
+                    "imported_record_count": sum(
+                        count for _, succeeded, count in outcomes if succeeded
+                    ),
+                    "last_checked_at": coverage_imported_at,
+                    "batch_id": batch_id,
+                    "imported_at": coverage_imported_at,
+                }
+            )
+        normalized["wearable_coverage"] = capture_coverage
+        normalized["capture_type_count"] = len(SUPPORTED_CAPTURE_DATA_TYPES)
+        normalized["successful_capture_type_count"] = sum(
+            1 for row in capture_coverage if row["status"] == "success"
+        )
+        normalized["capture_query_count"] = len(CAPTURE_SPECS)
+        normalized["capture_errors"] = capture_errors
+        normalized["errors"] = list(dict.fromkeys([*errors, *capture_errors]))
         normalized["failed_query_keys"] = failed_query_keys
         return normalized
 
@@ -628,6 +1029,117 @@ def merge_partial_daily(
         details.append("no prior value available for failed queries")
     output["quality"] = f"{base_quality}; {'; '.join(details)}"
     return output
+
+
+def normalize_wearable_payloads(
+    captured: list[tuple[QuerySpec, list[dict[str, Any]]]],
+    batch_id: str,
+    timezone_name: str | None = None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Preserve ghealth's typed JSON while adding stable ledger identity.
+
+    These records are the comprehensive capture layer.  They are deliberately
+    separate from the smaller semantic views used for decisions, and the
+    provider payload is not projected into Agent context or Excel.
+    """
+
+    imported_at = utc_now()
+    imported_datetime = aware_datetime(imported_at, timezone_name)
+    if imported_datetime is None:
+        imported_datetime = datetime.now(timezone.utc)
+    records: list[dict[str, Any]] = []
+    cutoffs: list[datetime] = []
+
+    for spec, rows in captured:
+        for point in rows:
+            day = direct_date(
+                point,
+                prefer_end=spec.data_type == "sleep",
+                timezone_name=timezone_name,
+            )
+            source = source_name(point)
+            external_id = explicit(point, "id", "name", "externalId")
+            timestamp = next(
+                (
+                    point.get(key)
+                    for key in ("time", "start", "startTime", "startDateTime")
+                    if isinstance(point.get(key), str)
+                ),
+                None,
+            )
+            end_time = next(
+                (
+                    point.get(key)
+                    for key in ("end", "endTime", "endDateTime")
+                    if isinstance(point.get(key), str)
+                ),
+                None,
+            )
+            if external_id:
+                identity: list[Any] = [
+                    spec.data_type,
+                    spec.operation,
+                    str(external_id),
+                ]
+            else:
+                # Date/time and source distinguish parallel streams. The
+                # canonical point is the final fallback for untimed catalogs
+                # and records that expose no temporal identity. Keeping values
+                # out of a timed identity lets a provider correction update the
+                # existing row instead of creating a contradictory duplicate.
+                identity = [
+                    spec.data_type,
+                    spec.operation,
+                    source or "unknown-source",
+                    day or "",
+                    timestamp or "",
+                    end_time or "",
+                ]
+                if not any((day, timestamp, end_time)):
+                    identity.append(
+                        json.dumps(
+                            point,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        )
+                    )
+            record_id = stable_record_id("wearable", identity)
+            cutoff = point_cutoff(point, timezone_name)
+            if cutoff is None and day:
+                cutoff = fallback_day_cutoff(
+                    day, imported_datetime, timezone_name
+                )
+            if cutoff is not None:
+                cutoffs.append(cutoff)
+            records.append(
+                {
+                    "record_id": record_id,
+                    "date": day,
+                    "data_type": spec.data_type,
+                    "operation": spec.operation,
+                    "grain": spec.grain,
+                    "time": timestamp,
+                    "end_time": end_time,
+                    "source": source,
+                    "external_id": str(external_id or ""),
+                    "data_until": utc_iso(cutoff),
+                    "provider_data": point,
+                    "batch_id": batch_id,
+                    "imported_at": imported_at,
+                }
+            )
+
+    records.sort(
+        key=lambda row: (
+            str(row.get("data_type") or ""),
+            str(row.get("operation") or ""),
+            str(row.get("date") or ""),
+            str(row.get("time") or ""),
+            str(row.get("record_id") or ""),
+        )
+    )
+    return records, utc_iso(max(cutoffs)) if cutoffs else None
 
 
 def normalize_payloads(

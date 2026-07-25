@@ -152,7 +152,7 @@ The default binary is `~/.local/bin/ghealth`. Open Health Agent also checks that
 3. Connect that store to the Google Health app/account and verify that the desired metric appears there.
 4. Run `ghealth setup --instructions` and create the **Desktop application** OAuth client it describes. The generic [Google Health API setup page](https://developers.google.com/health/setup) currently documents a Web Server client for applications that integrate with the API directly; that client and its `https://www.google.com` redirect are not the client flow used by this CLI.
 5. In the Google Cloud OAuth consent screen, add the required scopes under **Data Access → Add or remove scopes**, and add the synchronizing Google account under **Audience → Test users** while the project is in Testing. Local CLI scope flags do not register scopes in Cloud.
-6. For OHA's 14 mapped query families, request only `activity_and_fitness.readonly`, `health_metrics_and_measurements.readonly`, and `sleep.readonly` from the [Google Health scope reference](https://developers.google.com/health/scopes).
+6. For OHA's 40-type capture registry, request `activity_and_fitness.readonly`, `health_metrics_and_measurements.readonly`, `sleep.readonly`, `nutrition.readonly`, `ecg.readonly`, and `irn.readonly` from the [Google Health scope reference](https://developers.google.com/health/scopes). ECG and IRN may require separate account/project eligibility.
 7. Authenticate `ghealth`, run a small manual query, and only then enable automated import.
 
 ### Configure the Desktop OAuth client
@@ -161,20 +161,20 @@ Keep the downloaded client JSON in a private local directory outside the reposit
 
 ```bash
 ghealth setup --instructions
-ghealth setup --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
+ghealth setup --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly,nutrition.readonly,ecg.readonly,irn.readonly
 ```
 
 On a computer with a usable browser, authenticate with the Desktop client's temporary loopback/PKCE callback:
 
 ```bash
-ghealth auth login --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
+ghealth auth login --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly,nutrition.readonly,ecg.readonly,irn.readonly
 ghealth auth status --validate
 ```
 
 For a headless shell, use the same **Desktop application** client. Start the non-interactive flow, privately open the emitted URL, then copy only the `code` query parameter from the redirected browser address into the completion command:
 
 ```bash
-ghealth auth login --non-interactive --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
+ghealth auth login --non-interactive --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly,nutrition.readonly,ecg.readonly,irn.readonly
 ghealth auth login --complete '<code>'
 ghealth auth status --validate
 ```

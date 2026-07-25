@@ -1604,10 +1604,23 @@ def _command_sync_impl(arguments: argparse.Namespace, config) -> dict[str, Any]:
                     pending_records.append(
                         ("workout", payload, str(payload["record_id"]))
                     )
+                for payload in result.get("wearable", []):
+                    pending_records.append(
+                        ("wearable", payload, str(payload["record_id"]))
+                    )
+                for payload in result.get("wearable_coverage", []):
+                    pending_records.append(
+                        (
+                            "wearable_coverage",
+                            payload,
+                            str(payload["record_id"]),
+                        )
+                    )
                 counts = {
                     "daily": len(result["daily"]),
                     "measurements": len(result["measurements"]),
                     "workouts": len(result["workouts"]),
+                    "wearable": len(result.get("wearable", [])),
                 }
                 total = sum(counts.values())
                 if errors and total:
@@ -1643,6 +1656,13 @@ def _command_sync_impl(arguments: argparse.Namespace, config) -> dict[str, Any]:
                     "to_date": end,
                     "status": status,
                     "counts": counts,
+                    "capture": {
+                        "supported_data_types": result.get("capture_type_count", 0),
+                        "successful_data_types": result.get(
+                            "successful_capture_type_count", 0
+                        ),
+                        "queries": result.get("capture_query_count", 0),
+                    },
                     "data_until": result.get("data_until"),
                     "errors": errors,
                 }

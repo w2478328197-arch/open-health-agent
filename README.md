@@ -63,13 +63,13 @@ flowchart LR
 3. 同一个 Google Health 账号里能看到该指标；
 4. 用户授权了对应只读 scope；
 5. Google Health API 实际返回它；
-6. Open Health Agent 当前适配器已经映射该类型。
+6. Open Health Agent 当前锁定的 `ghealth` 版本仍支持该类型。
 
-[`ghealth`](https://github.com/Google-Health-API/google-health-cli) 当前声明 40 类经过真实 API 验证的数据类型，覆盖活动、连续/每日生命体征、身体测量、睡眠、训练、血糖、ECG、体温、饮水和营养等；可用 `ghealth schema types` 查看安装版本的完整清单。**这不等于本项目已经自动导入全部 40 类。** Open Health Agent 当前只映射以下 14 类查询：
+[`ghealth`](https://github.com/Google-Health-API/google-health-cli) 当前声明 40 类经过真实 API 验证的数据类型，覆盖活动、连续/每日生命体征、身体测量、睡眠、训练、血糖、ECG、体温、饮水和营养等；可用 `ghealth schema types` 查看安装版本的完整清单。Open Health Agent 会检查全部 40 类，并把 `ghealth` 返回的常规 JSON 数据点写入 SQLite 的原始采集层。步数、距离、活跃消耗和游泳同时保留细粒度流与每日汇总，因此一共执行 44 个采集查询。
 
-`steps`、`distance`、`active-energy-burned`、`active-minutes`、`daily-resting-heart-rate`、`daily-heart-rate-variability`、`daily-oxygen-saturation`、`daily-respiratory-rate`、`daily-vo2-max`、`weight`、`body-fat`、`height`、`sleep --detail`、`exercise`。
+现有 14 类语义映射继续生成 `健康日报`、`健康测量` 和 `训练记录`。其他细粒度样本、ECG 波形、告警和参考目录留在原始采集层；Excel 只展示逐类型覆盖摘要，Agent 也只看到覆盖信息。某个新指标只有经过明确的字段映射、单位校验和使用规则后才进入分析层。
 
-因此，全天连续心率、楼层、海拔、心率区间、久坐、游泳、基础/总热量、血糖、体温、睡眠温度、ECG、不规则心律通知以及 Google Health 中的饮水/营养日志等，即使 `ghealth` 能查询，当前也不会由 OHA 自动写入。训练记录中可能带平均/最高心率，但这不等于已导入全天心率。缺失日期和空结果必须保留为空，不能当成 0。
+“列入采集清单”不代表账号一定会返回数据。设备链路、账号、地区、scope 或 API 资格缺一项，对应类型会显示空结果或失败；同步状态和 Excel 的 `可穿戴数据覆盖` 会保留这个差异。缺失日期和空结果仍为空，不能当成 0。
 
 ### Google Health 官方列出的设备路径
 
@@ -77,12 +77,12 @@ flowchart LR
 
 | 设备/来源 | 到 Google Health 的路径 | Google 列出的代表性数据 | Google 明确列出的缺口或条件 |
 |---|---|---|---|
-| Fitbit / Pixel Watch | Google 第一方设备路径 | 步数、距离、睡眠、训练、静息心率；部分型号/地区还有 HRV、SpO₂、呼吸率 | 数据取决于设备型号、地区和资格；OHA 当前不映射全天心率、皮温、ECG 或不规则心律 |
+| Fitbit / Pixel Watch | Google 第一方设备路径 | 步数、距离、睡眠、训练、静息心率；部分型号/地区还有 HRV、SpO₂、呼吸率 | 数据取决于设备型号、地区和资格；类型进入采集清单不代表账号具备 ECG 或不规则心律资格 |
 | Apple Watch | Apple Watch → Apple Health → Google Health | 步数、楼层、距离、总能量、睡眠、训练/路线、体重/身体测量、VO₂ max、心率和夜间生命体征 | 暂无运动分钟、站立小时、ECG/不规则心律提醒和全天生命体征 |
 | Garmin | Garmin → Garmin Connect → Health Connect / Apple Health → Google Health | 步数、距离、楼层、能量、睡眠、训练摘要、心率/静息心率、体重 | 不共享 HRV、呼吸率、SpO₂、VO₂ max、皮温、分钟/小时能量、路线和分圈 |
 | Mi Fitness / Xiaomi | Xiaomi → Mi Fitness → Health Connect → Google Health；仅 Android | 运动中心率、步数、距离、能量、睡眠、训练摘要/地图、体重 | 不共享 HRV、呼吸率、SpO₂、VO₂ max、皮温、运动外心率和分钟/小时距离/能量 |
 | Samsung Galaxy Watch | Galaxy Watch → Samsung Health → Health Connect → Google Health；仅 Android | 步数、距离、能量、睡眠、训练、心率、SpO₂、VO₂ max、体重 | 不共享静息心率、HRV、呼吸率、皮温、路线/分圈；需在 Samsung Health 同意处理健康与健身数据 |
-| Oura Ring | Oura → Oura App → Health Connect / Apple Health → Google Health | 步数、距离、睡眠、训练摘要、心率、HRV、体重 | 不共享静息心率、呼吸率、SpO₂、VO₂ max、皮温、路线/分圈；OHA 也不查询普通全天心率流 |
+| Oura Ring | Oura → Oura App → Health Connect / Apple Health → Google Health | 步数、距离、睡眠、训练摘要、心率、HRV、体重 | 不共享静息心率、呼吸率、SpO₂、VO₂ max、皮温、路线/分圈；OHA 无法补出上游未共享的数据 |
 | Whoop | Whoop → Whoop App → Health Connect → Google Health；仅 Android | 运动中心率、步数、热量、距离、睡眠、训练、静息心率、呼吸率、SpO₂、体重 | 不共享 HRV、VO₂ max、皮温、运动外心率、路线和分圈 |
 | Withings | Withings → Withings App → Health Connect / Apple Health → Google Health | 当前 Google 设备页未给完整指标矩阵，必须逐项验证 | Google 明确说明 Withings 血压数据尚不支持；请通过微信或 CLI 手工记录 |
 | Zepp / Amazfit | Amazfit → Zepp → Health Connect / Apple Health → Google Health | 步数、距离、能量、睡眠、训练、心率/静息心率、体重、呼吸率、VO₂ max、SpO₂、路线 | 不共享 HRV、皮温、楼层、分圈和心律提醒 |
@@ -371,18 +371,21 @@ export PATH="$HOME/.local/bin:$PATH"
 ghealth setup --instructions
 ```
 
-仓库每 6 小时自动检查 `ghealth` 上游默认分支。发现新 commit 后，机器人会更新不可变源码锁定值，生成中文[上游同步记录](docs/ghealth-upstream-updates.md)，并依次运行上游 Go 测试、构建、OHA 依赖的 14 类命令契约检查及 OHA 全量回归测试；全部通过后才自动合入。上游当前没有 Release/tag，因此不能按版本号跟踪。该机制不会扩大 OAuth scope，也不会静默替换用户设备上的已安装二进制，因为替换二进制会改变 scheduler 的安全绑定指纹，必须单独完成本机升级验收。
+仓库每 6 小时自动检查 `ghealth` 上游默认分支。发现新 commit 后，机器人会更新不可变源码锁定值，生成中文[上游同步记录](docs/ghealth-upstream-updates.md)，并依次运行上游 Go 测试、构建、40 类数据注册表/44 条采集查询契约检查及 OHA 全量回归测试；全部通过后才自动合入。上游当前没有 Release/tag，因此不能按版本号跟踪。该机制不会扩大 OAuth scope，也不会静默替换用户设备上的已安装二进制，因为替换二进制会改变 scheduler 的安全绑定指纹，必须单独完成本机升级验收。
 
-按照 `ghealth` 自己输出的步骤，在 Google Cloud 中启用 Google Health API，并创建 OAuth client ID。这里必须选择 **Desktop application**。在 OAuth consent screen 的 **Data Access → Add or remove scopes** 中加入以下三项，并在项目仍为 Testing 时到 **Audience → Test users** 加入实际同步 Google Health 的账号：
+按照 `ghealth` 自己输出的步骤，在 Google Cloud 中启用 Google Health API，并创建 OAuth client ID。这里必须选择 **Desktop application**。在 OAuth consent screen 的 **Data Access → Add or remove scopes** 中加入以下六项，并在项目仍为 Testing 时到 **Audience → Test users** 加入实际同步 Google Health 的账号：
 
 - `https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly`
 - `https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly`
 - `https://www.googleapis.com/auth/googlehealth.sleep.readonly`
+- `https://www.googleapis.com/auth/googlehealth.nutrition.readonly`
+- `https://www.googleapis.com/auth/googlehealth.ecg.readonly`
+- `https://www.googleapis.com/auth/googlehealth.irn.readonly`
 
-这是 OHA 当前 14 类导入实际需要的最小范围；上游 `readonly` 预设还会请求 OHA 不导入的 nutrition、profile、settings、location、ECG 和 IRN。下载 client secret JSON 后运行：
+这是覆盖当前 40 类采集清单的最小范围。ECG 和不规则心律属于单独的敏感 scope，账号或项目没有资格时对应查询会失败并使同步标记为 `partial`；其余已成功类型仍会落库。上游 `readonly` 预设还包含 OHA 不读取的 profile、settings 和 location。下载 client secret JSON 后运行：
 
 ```bash
-ghealth setup --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
+ghealth setup --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly,nutrition.readonly,ecg.readonly,irn.readonly
 ghealth auth status --validate
 ghealth config set timezone "$OHA_TIMEZONE"
 ```
@@ -394,13 +397,13 @@ ghealth config set timezone "$OHA_TIMEZONE"
 无图形浏览器的电脑仍然使用同一个 Desktop client：
 
 ```bash
-ghealth auth login --non-interactive --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
+ghealth auth login --non-interactive --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly,nutrition.readonly,ecg.readonly,irn.readonly
 # 在自己的浏览器打开 auth_url，从回跳地址栏只复制 code 查询参数：
 ghealth auth login --complete '<code>'
 ghealth auth status --validate
 ```
 
-`ghealth` 会把 client 和明文 token 保存在 `~/.config/ghealth/`，上游会将文件权限设为仅当前用户可读写。完成并验证后可删除 Downloads 中多余的 client JSON 副本，但不要删除 `ghealth` 管理的配置目录。不要把 client secret、授权 URL、code、token 或完整配置输出发到聊天、Issue 或 Git。Google consent screen 若仍处于 Testing，refresh token 约 7 天后可能失效；这和“账号里没有健康数据”是两种不同问题。失效时用上面的三个最小 scope 重新运行 `ghealth auth login --scopes ...`，再执行 `auth status --validate`、手动 `sync` 和 scheduler 检查。
+`ghealth` 会把 client 和明文 token 保存在 `~/.config/ghealth/`，上游会将文件权限设为仅当前用户可读写。完成并验证后可删除 Downloads 中多余的 client JSON 副本，但不要删除 `ghealth` 管理的配置目录。不要把 client secret、授权 URL、code、token 或完整配置输出发到聊天、Issue 或 Git。Google consent screen 若仍处于 Testing，refresh token 约 7 天后可能失效；这和“账号里没有健康数据”是两种不同问题。失效时用上面的六个最小 scope 重新运行 `ghealth auth login --scopes ...`，再执行 `auth status --validate`、手动 `sync` 和 scheduler 检查。
 
 先做一条最近两天的步数小查询；`--to` 在当前锁定版本中包含指定日期：
 

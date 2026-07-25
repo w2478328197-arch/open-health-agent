@@ -201,6 +201,32 @@ def test_context_omits_record_ids_original_wording_and_media_references(tmp_path
                 "original_text": "不应进入建议上下文的训练原话",
             },
         )
+        database.upsert(
+            "wearable",
+            {
+                "record_id": "private-wearable-id",
+                "date": "2026-01-02",
+                "data_type": "heart-rate",
+                "operation": "list",
+                "grain": "sample",
+                "source": "private-watch-name",
+                "provider_data": {
+                    "beatsPerMinute": 197,
+                    "waveform": "private-raw-waveform",
+                },
+            },
+        )
+        database.upsert(
+            "wearable_coverage",
+            {
+                "record_id": "coverage-heart-rate",
+                "data_type": "heart-rate",
+                "operations": ["list"],
+                "grains": ["sample"],
+                "status": "success",
+                "failed_query_count": 0,
+            },
+        )
         context = build_context(config, database, "2026-01-02")
 
     encoded = str(context)
@@ -212,10 +238,18 @@ def test_context_omits_record_ids_original_wording_and_media_references(tmp_path
         "不应进入建议上下文的原话",
         "不应进入建议上下文的备注",
         "不应进入建议上下文的训练原话",
+        "private-wearable-id",
+        "private-watch-name",
+        "private-raw-waveform",
+        "197",
     ):
         assert secret not in encoded
     assert context["privacy"]["mode"] == "advice_minimized"
     assert context["today"]["food_items"][0]["food_name"] == "合成测试餐"
+    wearable = context["trends"]["wearable_capture"]
+    assert wearable["checked_data_types"] == 1
+    assert wearable["streams"][0]["data_type"] == "heart-rate"
+    assert "provider_data" not in encoded
 
 
 def test_context_keeps_committed_sqlite_goal_when_profile_projection_is_invalid(

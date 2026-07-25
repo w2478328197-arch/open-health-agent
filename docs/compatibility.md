@@ -30,17 +30,17 @@
 
 Google 的[第三方设备连接说明](https://support.google.com/googlehealth/answer/14236613?hl=en)列出 Apple Watch、Garmin、Xiaomi、Samsung、Whoop、Oura、Withings、Zepp/Amazfit 等路径，也明确不同设备和指标的缺口。正确表述是：
 
-> 只有当设备数据经厂商 App 写入 Health Connect、Apple Health 或 Google 的直接路径，目标指标已出现在 Google Health，获得相应 OAuth 只读 scope，被 Google Health API 返回，而且属于 OHA 当前映射的 14 类查询时，本项目才会自动导入该指标。
+> 只有当设备数据经厂商 App 写入 Health Connect、Apple Health 或 Google 的直接路径，目标指标已出现在 Google Health，获得相应 OAuth 只读 scope，并被 Google Health API 返回时，OHA 才能把它写入原始采集层。进入日报、训练、测量或建议还需要明确的语义映射和使用规则。
 
 不要表述成“凡是手表都支持”或“支持品牌就支持所有指标”。
 
-`ghealth` 当前列出 40 类已验证 API 数据；OHA 只自动查询：`steps`、`distance`、`active-energy-burned`、`active-minutes`、`daily-resting-heart-rate`、`daily-heart-rate-variability`、`daily-oxygen-saturation`、`daily-respiratory-rate`、`daily-vo2-max`、`weight`、`body-fat`、`height`、`sleep --detail`、`exercise`。上游其余类型不会因为安装了 `ghealth` 就自动进入档案。
+`ghealth` 当前列出 40 类已验证 API 数据；OHA 会检查全部 40 类，并以 44 条查询流写入 SQLite 原始采集层。现有 14 类语义映射继续生成日报、测量和训练视图。其他细粒度样本、波形、告警和参考目录不会自动进入建议上下文。
 
 下表按 2026-07-14 的 Google 官方页面整理；它不是硬件白名单。
 
 | 来源 | 典型链路 | Google 列出的代表性数据 | 明确缺口/条件 |
 |---|---|---|---|
-| Fitbit / Pixel Watch | Google 第一方路径 | 步数、距离、睡眠、训练、静息心率和部分型号的夜间生命体征 | 型号、地区和资格相关；OHA 不映射全天心率、皮温、ECG/心律提醒 |
+| Fitbit / Pixel Watch | Google 第一方路径 | 步数、距离、睡眠、训练、静息心率和部分型号的夜间生命体征 | 型号、地区和资格相关；采集支持不代表账号具备皮温、ECG/心律提醒数据 |
 | Apple Watch | Apple Health → Google Health | 活动、睡眠、训练/路线、体重、VO₂ max、心率和夜间生命体征 | 无运动分钟、站立小时、ECG/心律提醒和全天生命体征 |
 | Garmin | Garmin Connect → Health Connect/Apple Health → Google Health | 活动、睡眠、训练摘要、心率/静息心率、体重 | 无 HRV、呼吸率、SpO₂、VO₂ max、皮温、路线/分圈 |
 | Mi Fitness / Xiaomi | Health Connect → Google Health；Android only | 运动中心率、活动、睡眠、训练/地图、体重 | 无 HRV、呼吸率、SpO₂、VO₂ max、皮温或运动外心率 |

@@ -85,18 +85,20 @@ The matrix below summarizes Google's current [Connect other devices and apps to 
 
 The manufacturer matrix answers “can this value reach Google Health?” It does not answer “does Open Health Agent import it?” That second boundary is below.
 
-### `ghealth`: 40 upstream types versus 14 Open Health Agent queries
+### `ghealth`: 40 captured types and 14 semantic mappings
 
-The upstream [`google-health-cli`](https://github.com/Google-Health-API/google-health-cli) project exposes commands for **40 Google Health API data types**. Open Health Agent v0.1.0 intentionally imports only **14 mapped query families**:
+The pinned [`google-health-cli`](https://github.com/Google-Health-API/google-health-cli) registry exposes **40 Google Health API data types**. Open Health Agent checks all 40 and stores the ordinary JSON data points returned by `ghealth` in the SQLite capture layer. Steps, distance, active energy, and swim lengths retain both granular streams and daily rollups, for 44 capture queries in total.
 
-| Group | Open Health Agent queries |
+The existing 14 semantic mappings still produce the stable daily, measurement, and workout views:
+
+| Group | Semantic mappings |
 |---|---|
 | Daily activity rollups | `steps`, `distance`, `active-energy-burned`, `active-minutes` |
 | Daily signals | `daily-resting-heart-rate`, `daily-heart-rate-variability`, `daily-oxygen-saturation`, `daily-respiratory-rate`, `daily-vo2-max` |
 | Body measurements | `weight`, `body-fat`, `height` |
 | Sessions | `sleep --detail`, `exercise` |
 
-Google Health or `ghealth` may support a type that this adapter does not map. Such data will not enter the ledger automatically. Do not describe all 40 upstream types as 40 automatically imported Open Health Agent metrics.
+Other samples, ECG waveforms, alerts, and reference catalogs remain in the capture layer. Excel and Agent context expose only per-type coverage metadata. A field enters analysis only after explicit semantic mapping, unit validation, and rule review. A registered type may still be empty or fail because of the device path, account, region, OAuth scope, or API eligibility; never describe the 40 registered types as 40 metrics that a particular user necessarily has.
 
 ### Model, image, and voice matrix
 
@@ -388,18 +390,21 @@ export PATH="$HOME/.local/bin:$PATH"
 ghealth setup --instructions
 ```
 
-The repository checks the upstream default branch every six hours. When a new commit appears, automation updates the immutable source pin, writes an auditable [upstream sync note](docs/ghealth-upstream-updates.md), and runs the upstream Go tests, a clean build, the 14-command-family OHA contract check, and the complete OHA regression suite. The generated pull request is merged only after every gate passes. Upstream currently publishes no releases or tags, so tracking is commit-based. This does not broaden OAuth scopes or silently replace a binary on a user's machine, because that would change the scheduler's security-bound runtime fingerprint and requires a separate local upgrade acceptance flow.
+The repository checks the upstream default branch every six hours. When a new commit appears, automation updates the immutable source pin, writes an auditable [upstream sync note](docs/ghealth-upstream-updates.md), and runs the upstream Go tests, a clean build, the 40-type/44-query capture contract check, and the complete OHA regression suite. The generated pull request is merged only after every gate passes. Upstream currently publishes no releases or tags, so tracking is commit-based. This does not broaden OAuth scopes or silently replace a binary on a user's machine, because that would change the scheduler's security-bound runtime fingerprint and requires a separate local upgrade acceptance flow.
 
-Follow the instructions emitted by `ghealth`, enable the Google Health API in Google Cloud, and create an OAuth client ID. For this CLI, choose **Desktop application**. Under the OAuth consent screen, use **Data Access → Add or remove scopes** to add these three scopes; while the project is in Testing, also add the actual synchronizing account under **Audience → Test users**:
+Follow the instructions emitted by `ghealth`, enable the Google Health API in Google Cloud, and create an OAuth client ID. For this CLI, choose **Desktop application**. Under the OAuth consent screen, use **Data Access → Add or remove scopes** to add these six scopes; while the project is in Testing, also add the actual synchronizing account under **Audience → Test users**:
 
 - `https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly`
 - `https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly`
 - `https://www.googleapis.com/auth/googlehealth.sleep.readonly`
+- `https://www.googleapis.com/auth/googlehealth.nutrition.readonly`
+- `https://www.googleapis.com/auth/googlehealth.ecg.readonly`
+- `https://www.googleapis.com/auth/googlehealth.irn.readonly`
 
-These are the minimum scopes for OHA's current 14 mapped imports. Upstream's broad `readonly` preset also asks for nutrition, profile, settings, location, ECG, and IRN categories that OHA does not import. Download the client-secret JSON, then run:
+These are the minimum scope categories for the current 40-type capture registry. ECG and irregular-rhythm access use separate sensitive scopes; an ineligible account or project will leave those queries failed and the sync `partial`, while successful types still commit. Upstream's broader `readonly` preset also asks for profile, settings, and location, which OHA does not read. Download the client-secret JSON, then run:
 
 ```bash
-ghealth setup --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
+ghealth setup --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly,nutrition.readonly,ecg.readonly,irn.readonly
 ghealth auth status --validate
 ghealth config set timezone "$OHA_TIMEZONE"
 ```
@@ -411,7 +416,7 @@ If the account, region, or project cannot enable the Google Health API, full wea
 A computer without a graphical browser still uses the same Desktop client:
 
 ```bash
-ghealth auth login --non-interactive --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
+ghealth auth login --non-interactive --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly,nutrition.readonly,ecg.readonly,irn.readonly
 # Open auth_url privately in your own browser. Copy only the code query parameter:
 ghealth auth login --complete '<code>'
 ghealth auth status --validate
