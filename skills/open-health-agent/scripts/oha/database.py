@@ -418,6 +418,51 @@ class HealthDatabase:
         ).fetchall()
         return [json.loads(row["payload_json"]) for row in rows]
 
+    def wearable_coverage(self) -> list[dict[str, Any]]:
+        """Return bounded per-type coverage without decoding raw observations."""
+
+        status_rows = self.list_records("wearable_coverage")
+        by_type = {
+            str(row.get("data_type")): dict(row)
+            for row in status_rows
+            if isinstance(row.get("data_type"), str) and row.get("data_type")
+        }
+        aggregate_rows = self.connection.execute(
+            """
+            SELECT
+                json_extract(payload_json, '$.data_type') AS data_type,
+                COUNT(*) AS record_count,
+                MIN(event_date) AS first_date,
+                MAX(event_date) AS last_date,
+                MAX(json_extract(payload_json, '$.data_until')) AS data_until,
+                COUNT(DISTINCT NULLIF(source, '')) AS source_count
+            FROM records
+            WHERE kind='wearable'
+            GROUP BY json_extract(payload_json, '$.data_type')
+            ORDER BY data_type
+            """
+        ).fetchall()
+        for aggregate in aggregate_rows:
+            data_type = str(aggregate["data_type"] or "")
+            if not data_type:
+                continue
+            by_type.setdefault(data_type, {"data_type": data_type}).update(
+                {
+                    "record_count": int(aggregate["record_count"] or 0),
+                    "first_date": aggregate["first_date"],
+                    "last_date": aggregate["last_date"],
+                    "data_until": aggregate["data_until"],
+                    "source_count": int(aggregate["source_count"] or 0),
+                }
+            )
+        for row in by_type.values():
+            row.setdefault("record_count", 0)
+            row.setdefault("first_date", None)
+            row.setdefault("last_date", None)
+            row.setdefault("data_until", None)
+            row.setdefault("source_count", 0)
+        return [by_type[data_type] for data_type in sorted(by_type)]
+
     def get(self, kind: str, record_id: str) -> dict[str, Any] | None:
         row = self.connection.execute(
             "SELECT payload_json FROM records WHERE kind=? AND record_id=?",

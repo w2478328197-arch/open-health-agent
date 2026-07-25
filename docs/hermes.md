@@ -148,14 +148,14 @@ hermes pairing list
 设备 → 厂商 App → Health Connect/Apple Health → Google Health
 ```
 
-`ghealth` 使用的是 [Google-Health-API/google-health-cli](https://github.com/Google-Health-API/google-health-cli)。先让已安装的版本输出配置说明，再按说明创建自己的 **Desktop application** OAuth client。OHA 当前 14 类导入只需要 `activity_and_fitness.readonly`、`health_metrics_and_measurements.readonly` 和 `sleep.readonly`；不要用覆盖 nutrition、profile、settings、location、ECG 和 IRN 的全部只读预设。不要复制别人的 OAuth client secret 或 token。
+`ghealth` 使用的是 [Google-Health-API/google-health-cli](https://github.com/Google-Health-API/google-health-cli)。先让已安装的版本输出配置说明，再按说明创建自己的 **Desktop application** OAuth client。OHA 的 40 类采集清单需要 `activity_and_fitness.readonly`、`health_metrics_and_measurements.readonly`、`sleep.readonly`、`nutrition.readonly`、`ecg.readonly` 和 `irn.readonly`；上游全部只读预设还包含 OHA 不读取的 profile、settings 和 location。ECG/IRN 可能受账号或项目资格限制。不要复制别人的 OAuth client secret 或 token。
 
 ```bash
 ghealth setup --instructions
-ghealth setup --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
+ghealth setup --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly,nutrition.readonly,ecg.readonly,irn.readonly
 ```
 
-在 Google Cloud OAuth consent screen 的 **Data Access → Add or remove scopes** 中也加入这三个完整的 Google Health scope，并在 **Audience** 中把实际同步账号加入 test users（若项目仍为 Testing）。`ghealth --scopes` 只限制本机请求，不会替你修改 Cloud consent screen。
+在 Google Cloud OAuth consent screen 的 **Data Access → Add or remove scopes** 中也加入这六个完整的 Google Health scope，并在 **Audience** 中把实际同步账号加入 test users（若项目仍为 Testing）。`ghealth --scopes` 只限制本机请求，不会替你修改 Cloud consent screen。
 
 Google 的通用 [Health API OAuth 设置页](https://developers.google.com/health/setup)目前介绍的是开发者自己编写直接 API 客户端时使用的 **Web Server** client 和 `https://www.google.com` redirect。它不是这套 `ghealth` CLI 的授权方式；不要为了 `ghealth` 创建该 Web client，也不要把这两种回调流程混用。
 

@@ -148,6 +148,7 @@ The canonical headers live in `scripts/oha/constants.py`. Do not rename or reord
 | `饮食营养明细` | one nutrient fact per food | extensible nutrients beyond the fixed summary columns |
 | `每日营养汇总` | one local date | recorded totals, macro-based TEF range, field coverage, update time |
 | `目标历史` | one goal version/event | exact wording, status, priority, effective date, safety constraint |
+| `可穿戴数据覆盖` | one ghealth data type | query operations/grains, latest status, cumulative record/date/source coverage, decision boundary |
 | `同步日志` | one import run | query interval, counts, status, data cutoff, error summary |
 | `健康说明` | one rule/note | definitions, missing-value behavior, estimates, and privacy reminders |
 

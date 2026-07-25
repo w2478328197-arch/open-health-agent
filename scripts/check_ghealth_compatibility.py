@@ -7,26 +7,41 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
-
-QUERY_SPECS = (
-    ("steps", "daily-rollup", ("--from", "--to")),
-    ("distance", "daily-rollup", ("--from", "--to")),
-    ("active-energy-burned", "daily-rollup", ("--from", "--to")),
-    ("active-minutes", "daily-rollup", ("--from", "--to")),
-    ("daily-resting-heart-rate", "list", ("--from", "--to", "--limit", "--page-token")),
-    ("daily-heart-rate-variability", "list", ("--from", "--to", "--limit", "--page-token")),
-    ("daily-oxygen-saturation", "list", ("--from", "--to", "--limit", "--page-token")),
-    ("daily-respiratory-rate", "list", ("--from", "--to", "--limit", "--page-token")),
-    ("daily-vo2-max", "list", ("--from", "--to", "--limit", "--page-token")),
-    ("weight", "list", ("--from", "--to", "--limit", "--page-token")),
-    ("body-fat", "list", ("--from", "--to", "--limit", "--page-token")),
-    ("height", "list", ("--from", "--to", "--limit", "--page-token")),
-    ("sleep", "list", ("--from", "--to", "--limit", "--page-token", "--detail")),
-    ("exercise", "list", ("--from", "--to", "--limit", "--page-token")),
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(
+    0, str(REPOSITORY_ROOT / "skills" / "open-health-agent" / "scripts")
 )
+
+from oha.ghealth_adapter import (  # noqa: E402
+    CAPTURE_SPECS,
+    QUERY_SPECS as SEMANTIC_QUERY_SPECS,
+    SUPPORTED_CAPTURE_DATA_TYPES,
+)
+
+
+def command_specs() -> tuple[tuple[str, str, tuple[str, ...]], ...]:
+    required: dict[tuple[str, str], set[str]] = {}
+    for spec in (*SEMANTIC_QUERY_SPECS, *CAPTURE_SPECS):
+        flags = required.setdefault((spec.data_type, spec.operation), set())
+        if spec.use_date_range:
+            flags.add("--from")
+            if spec.include_to:
+                flags.add("--to")
+        if spec.operation == "list":
+            flags.update(("--limit", "--page-token"))
+        if spec.detail:
+            flags.add("--detail")
+    return tuple(
+        (data_type, operation, tuple(sorted(flags)))
+        for (data_type, operation), flags in sorted(required.items())
+    )
+
+
+COMMAND_SPECS = command_specs()
 
 
 def run(binary: Path, environment: dict[str, str], *arguments: str) -> str:
@@ -76,11 +91,15 @@ def check(binary: Path) -> None:
         if not isinstance(config, dict):
             raise RuntimeError("ghealth config show no longer returns a JSON object")
 
-        for data_type, operation, flags in QUERY_SPECS:
+        for data_type, operation, flags in COMMAND_SPECS:
             output = run(selected, environment, "data", data_type, operation, "--help")
             require_flags(output, f"data {data_type} {operation}", flags)
 
-    print(f"ghealth command contract is compatible with all {len(QUERY_SPECS)} OHA query families")
+    print(
+        "ghealth command contract is compatible with "
+        f"{len(SUPPORTED_CAPTURE_DATA_TYPES)} data types and "
+        f"{len(COMMAND_SPECS)} command shapes"
+    )
 
 
 def main() -> int:

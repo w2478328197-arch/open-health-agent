@@ -71,6 +71,58 @@ def test_partial_daily_merge_preserves_prior_fields(tmp_path: Path) -> None:
         assert row["weight_kg"] == 70.0
 
 
+def test_wearable_coverage_combines_empty_type_status_and_observations(
+    tmp_path: Path,
+) -> None:
+    with HealthDatabase(tmp_path / "health.sqlite3") as database:
+        database.upsert(
+            "wearable_coverage",
+            {
+                "record_id": "coverage-heart-rate",
+                "data_type": "heart-rate",
+                "operations": ["list"],
+                "grains": ["sample"],
+                "status": "success",
+                "failed_query_count": 0,
+                "last_checked_at": "2026-01-03T00:00:00+00:00",
+            },
+        )
+        database.upsert(
+            "wearable_coverage",
+            {
+                "record_id": "coverage-ecg",
+                "data_type": "electrocardiogram",
+                "operations": ["list"],
+                "grains": ["waveform"],
+                "status": "failed",
+                "failed_query_count": 1,
+                "last_checked_at": "2026-01-03T00:00:00+00:00",
+            },
+        )
+        database.upsert(
+            "wearable",
+            {
+                "record_id": "wearable-heart-rate-1",
+                "date": "2026-01-02",
+                "data_type": "heart-rate",
+                "operation": "list",
+                "grain": "sample",
+                "source": "synthetic.watch",
+                "data_until": "2026-01-02T08:00:00+00:00",
+                "provider_data": {"beatsPerMinute": 70},
+            },
+        )
+        coverage = {
+            row["data_type"]: row for row in database.wearable_coverage()
+        }
+
+    assert coverage["heart-rate"]["record_count"] == 1
+    assert coverage["heart-rate"]["first_date"] == "2026-01-02"
+    assert coverage["heart-rate"]["source_count"] == 1
+    assert coverage["electrocardiogram"]["record_count"] == 0
+    assert coverage["electrocardiogram"]["status"] == "failed"
+
+
 def test_delete_requires_existing_record_and_preserves_audit(tmp_path: Path) -> None:
     with HealthDatabase(tmp_path / "health.sqlite3") as database:
         database.upsert("goal", {"record_id": "goal-1", "date": "2026-01-01"})

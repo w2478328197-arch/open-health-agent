@@ -11,12 +11,16 @@ import pytest
 from oha.database import HealthDatabase
 import oha.ghealth_adapter as adapter_module
 from oha.ghealth_adapter import (
+    CAPTURE_SPECS,
     CommandRunner,
     FixtureRunner,
     GHealthAdapter,
     GHealthError,
+    QuerySpec,
+    SUPPORTED_CAPTURE_DATA_TYPES,
     merge_partial_daily,
     normalize_payloads,
+    normalize_wearable_payloads,
     redact,
 )
 
@@ -46,6 +50,153 @@ def test_fixture_fetch_normalizes_latest_rollup_and_preferred_sleep_source() -> 
     assert result["measurements"][0]["value"] == 72
     assert result["workouts"][0]["external_id"] == "synthetic-workout-001"
     assert result["workouts"][0]["record_id"].startswith("wor_")
+    assert result["capture_type_count"] == 40
+    assert result["successful_capture_type_count"] == 40
+    assert result["capture_query_count"] == 44
+    assert len(result["wearable_coverage"]) == 40
+    assert result["wearable"]
+
+
+def test_full_capture_registry_matches_pinned_ghealth_contract() -> None:
+    assert len(SUPPORTED_CAPTURE_DATA_TYPES) == 40
+    assert len(CAPTURE_SPECS) == 44
+    assert {
+        "heart-rate",
+        "blood-glucose",
+        "electrocardiogram",
+        "irregular-rhythm-notification",
+        "nutrition-log",
+        "daily-heart-rate-zones",
+    }.issubset(SUPPORTED_CAPTURE_DATA_TYPES)
+    assert sum(spec.data_type == "steps" for spec in CAPTURE_SPECS) == 2
+    assert sum(spec.data_type == "distance" for spec in CAPTURE_SPECS) == 2
+    assert sum(spec.data_type == "swim-lengths-data" for spec in CAPTURE_SPECS) == 2
+
+
+def test_rollup_queries_are_split_at_provider_range_caps() -> None:
+    calls: list[list[str]] = []
+
+    class RecordingRunner:
+        def run(self, arguments: list[str]) -> dict:
+            calls.append(arguments)
+            return {"dataPoints": []}
+
+    adapter = GHealthAdapter(RecordingRunner())  # type: ignore[arg-type]
+    adapter.query(
+        QuerySpec(
+            "short-rollup",
+            "active-minutes",
+            "daily-rollup",
+            max_days=14,
+        ),
+        "2026-01-01",
+        "2026-01-31",
+    )
+
+    assert [
+        (
+            call[call.index("--from") + 1],
+            call[call.index("--to") + 1],
+        )
+        for call in calls
+    ] == [
+        ("2026-01-01", "2026-01-14"),
+        ("2026-01-15", "2026-01-28"),
+        ("2026-01-29", "2026-01-31"),
+    ]
+
+
+def test_query_accepts_unsimplified_rollup_envelope() -> None:
+    class RollupRunner:
+        def run(self, _arguments: list[str]) -> dict:
+            return {
+                "rollupDataPoints": [
+                    {"date": "2026-01-02", "countSum": "4321"}
+                ]
+            }
+
+    rows = GHealthAdapter(RollupRunner()).query(  # type: ignore[arg-type]
+        QuerySpec("steps", "steps", "daily-rollup", max_days=90),
+        "2026-01-01",
+        "2026-01-03",
+    )
+
+    assert rows == [{"date": "2026-01-02", "countSum": "4321"}]
+
+
+def test_catalog_omits_dates_and_ecg_enforces_requested_upper_bound() -> None:
+    calls: list[list[str]] = []
+
+    class RecordingRunner:
+        def run(self, arguments: list[str]) -> dict:
+            calls.append(arguments)
+            if "electrocardiogram" in arguments:
+                return {
+                    "dataPoints": [
+                        {"start": "2026-01-02T08:00:00Z", "id": "in-range"},
+                        {"start": "2026-01-05T08:00:00Z", "id": "too-new"},
+                    ]
+                }
+            return {"dataPoints": []}
+
+    adapter = GHealthAdapter(RecordingRunner(), timezone_name="UTC")  # type: ignore[arg-type]
+    catalog = next(spec for spec in CAPTURE_SPECS if spec.data_type == "food")
+    ecg = next(
+        spec for spec in CAPTURE_SPECS if spec.data_type == "electrocardiogram"
+    )
+
+    adapter.query(catalog, "2026-01-01", "2026-01-03")
+    ecg_rows = adapter.query(ecg, "2026-01-01", "2026-01-03")
+
+    assert "--from" not in calls[0]
+    assert "--to" not in calls[0]
+    assert "--from" in calls[1]
+    assert "--to" not in calls[1]
+    assert [row["id"] for row in ecg_rows] == ["in-range"]
+
+
+def test_wearable_identity_updates_timed_provider_corrections() -> None:
+    spec = QuerySpec(
+        "capture-heart-rate",
+        "heart-rate",
+        "list",
+        grain="sample",
+    )
+    first, _ = normalize_wearable_payloads(
+        [
+            (
+                spec,
+                [
+                    {
+                        "time": "2026-01-02T08:00:00Z",
+                        "beatsPerMinute": 70,
+                        "source": "synthetic.watch",
+                    }
+                ],
+            )
+        ],
+        "batch-one",
+        "UTC",
+    )
+    corrected, _ = normalize_wearable_payloads(
+        [
+            (
+                spec,
+                [
+                    {
+                        "time": "2026-01-02T08:00:00Z",
+                        "beatsPerMinute": 72,
+                        "source": "synthetic.watch",
+                    }
+                ],
+            )
+        ],
+        "batch-two",
+        "UTC",
+    )
+
+    assert first[0]["record_id"] == corrected[0]["record_id"]
+    assert corrected[0]["provider_data"]["beatsPerMinute"] == 72
 
 
 def test_stable_normalization_and_database_upsert_deduplicate_reimports(tmp_path: Path) -> None:

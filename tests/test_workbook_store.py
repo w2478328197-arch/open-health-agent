@@ -58,6 +58,34 @@ def test_export_preserves_non_health_sheet_and_builds_health_views(tmp_path: Pat
                 },
             },
         )
+        database.upsert(
+            "wearable_coverage",
+            {
+                "record_id": "coverage-heart-rate",
+                "data_type": "heart-rate",
+                "operations": ["list"],
+                "grains": ["sample"],
+                "status": "success",
+                "failed_query_count": 0,
+                "last_checked_at": "2026-01-03T00:00:00+00:00",
+            },
+        )
+        database.upsert(
+            "wearable",
+            {
+                "record_id": "wearable-heart-rate-1",
+                "date": "2026-01-02",
+                "data_type": "heart-rate",
+                "operation": "list",
+                "grain": "sample",
+                "source": "synthetic.watch",
+                "data_until": "2026-01-02T08:00:00+00:00",
+                "provider_data": {
+                    "beatsPerMinute": 70,
+                    "waveform": "must-not-enter-workbook",
+                },
+            },
+        )
         result = export_workbook(config, database, tmp_path / "missing-template.xlsx")
 
     assert result == destination
@@ -73,6 +101,12 @@ def test_export_preserves_non_health_sheet_and_builds_health_views(tmp_path: Pat
         assert summary["B2"].value == 1
         assert summary["C2"].value == 600
         assert summary["N2"].value < summary["O2"].value < summary["P2"].value
+        wearable = check["可穿戴数据覆盖"]
+        assert wearable["A2"].value == "heart-rate"
+        assert wearable["E2"].value == 1
+        assert "must-not-enter-workbook" not in str(
+            list(wearable.values)
+        )
     finally:
         check.close()
 

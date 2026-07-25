@@ -36,6 +36,7 @@ TABLE_NAMES = {
     "饮食营养明细": "NutrientsTable",
     "每日营养汇总": "DailyNutritionTable",
     "目标历史": "GoalsTable",
+    "可穿戴数据覆盖": "WearableCoverageTable",
     "同步日志": "SyncRunsTable",
     "健康说明": "HealthNotesTable",
 }
@@ -107,7 +108,15 @@ def style_sheet(ws, headers: list[str]) -> None:
         if header == "日期" or header == "生效日期" or header == "检索日期":
             for cell in ws[column][1:]:
                 cell.number_format = "yyyy-mm-dd"
-        if header in {"原话", "备注", "错误摘要", "估算说明", "说明", "安全约束"}:
+        if header in {
+            "原话",
+            "备注",
+            "错误摘要",
+            "估算说明",
+            "说明",
+            "安全约束",
+            "使用边界",
+        }:
             ws.column_dimensions[column].width = 38 if header != "说明" else 80
             for cell in ws[column][1:]:
                 cell.alignment = Alignment(vertical="top", wrap_text=True)
@@ -376,6 +385,28 @@ def goal_rows(database: HealthDatabase) -> list[dict[str, Any]]:
     ]
 
 
+def wearable_coverage_rows(database: HealthDatabase) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for coverage in database.wearable_coverage():
+        rows.append(
+            {
+                "数据类型": coverage.get("data_type"),
+                "读取方式": ", ".join(coverage.get("operations") or []),
+                "数据粒度": ", ".join(coverage.get("grains") or []),
+                "本次读取状态": coverage.get("status") or "historical",
+                "累计记录数": coverage.get("record_count", 0),
+                "最早日期": coverage.get("first_date"),
+                "最晚日期": coverage.get("last_date"),
+                "最新数据时间": coverage.get("data_until"),
+                "来源数": coverage.get("source_count", 0),
+                "最近检查时间": coverage.get("last_checked_at"),
+                "失败查询数": coverage.get("failed_query_count", 0),
+                "使用边界": "原始层保存；仅经语义映射和规则校验的字段进入分析层",
+            }
+        )
+    return rows
+
+
 def sync_rows(database: HealthDatabase) -> list[dict[str, Any]]:
     output = []
     for run in reversed(database.list_sync_runs(limit=500)):
@@ -409,6 +440,7 @@ def workbook_payloads(database: HealthDatabase) -> dict[str, list[dict[str, Any]
         "饮食营养明细": nutrient_rows(database),
         "每日营养汇总": nutrition_summary_rows(database),
         "目标历史": goal_rows(database),
+        "可穿戴数据覆盖": wearable_coverage_rows(database),
         "同步日志": sync_rows(database),
         "健康说明": health_notes_rows(),
     }

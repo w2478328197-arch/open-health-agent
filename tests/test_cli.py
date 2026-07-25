@@ -715,7 +715,17 @@ def test_cli_private_end_to_end_with_synthetic_ghealth(tmp_path: Path) -> None:
             str(FIXTURES),
         )
         assert synced["status"] == "success"
-        assert synced["counts"] == {"daily": 1, "measurements": 1, "workouts": 1}
+        assert synced["counts"] == {
+            "daily": 1,
+            "measurements": 1,
+            "workouts": 1,
+            "wearable": 13,
+        }
+        assert synced["capture"] == {
+            "supported_data_types": 40,
+            "successful_data_types": 40,
+            "queries": 44,
+        }
     fixture_state = json.loads((home / "state.json").read_text(encoding="utf-8"))
     assert "last_manual_ghealth_sync" not in fixture_state
 
@@ -780,6 +790,8 @@ def test_cli_private_end_to_end_with_synthetic_ghealth(tmp_path: Path) -> None:
     assert counts["daily"] == 1
     assert counts["measurement"] == 1
     assert counts["workout"] == 1
+    assert counts["wearable"] == 13
+    assert counts["wearable_coverage"] == 40
     assert counts["food"] == 1
     assert counts["goal"] == 1
 
@@ -788,6 +800,7 @@ def test_cli_private_end_to_end_with_synthetic_ghealth(tmp_path: Path) -> None:
         assert workbook["健康日报"].max_row == 2
         assert workbook["健康测量"].max_row == 2
         assert workbook["训练记录"].max_row == 2
+        assert workbook["可穿戴数据覆盖"].max_row == 41
         assert workbook["饮食记录"].max_row == 2
         assert workbook["目标历史"].max_row == 2
     finally:

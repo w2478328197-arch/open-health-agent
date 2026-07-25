@@ -38,19 +38,21 @@ Google's [device and app connection guide](https://support.google.com/googleheal
 
 For Xiaomi and other manufacturers, verify the current Google matrix and the manufacturer's Health Connect/Apple Health export behavior. A brand name alone is not proof that HRV, sleep stages, SpO₂, VO₂ max, workout routes, or active energy will arrive.
 
-## Upstream types, OHA mappings, and device paths
+## Upstream types, capture layer, and device paths
 
-The pinned `ghealth` upstream release documents 40 verified API data types. OHA currently maps only these 14 query families:
+The pinned `ghealth` registry documents 40 verified API data types. OHA checks all 40 and writes returned JSON data points into the SQLite `wearable` capture layer. Steps, distance, active energy, and swim lengths use both granular and daily queries, so the registry contains 44 query streams.
+
+The existing 14 semantic mappings remain the only automatic inputs to the stable daily, measurement, and workout views:
 
 `steps`, `distance`, `active-energy-burned`, `active-minutes`, `daily-resting-heart-rate`, `daily-heart-rate-variability`, `daily-oxygen-saturation`, `daily-respiratory-rate`, `daily-vo2-max`, `weight`, `body-fat`, `height`, `sleep --detail`, and `exercise`.
 
-Do not claim that the other upstream types are automatically imported. The current gaps include continuous heart rate, floors, altitude, heart-rate zones, sedentary periods, swimming, basal/total energy, glucose, temperature, sleep temperature, ECG, irregular-rhythm notifications, and Google Health hydration/nutrition logs. Exercise summaries may contain average/max heart rate; that is not the continuous heart-rate stream.
+Other samples, waveforms, alerts, and reference catalogs are stored but not placed in advice context. Excel and context expose per-type coverage metadata only. A registered type can still be empty or fail because its device path, account, region, scope, or API eligibility is unavailable.
 
 The following table was verified against Google's official device page on 2026-07-14. It describes paths into Google Health, not a permanent hardware certification.
 
 | Source | Path | Representative data Google documents | Explicit gaps or conditions |
 |---|---|---|---|
-| Fitbit / Pixel Watch | Google first-party path | Activity, sleep, exercise, resting heart rate, and supported overnight vitals | Device-, region-, and eligibility-dependent; OHA does not map continuous heart rate, skin temperature, ECG, or rhythm alerts |
+| Fitbit / Pixel Watch | Google first-party path | Activity, sleep, exercise, resting heart rate, and supported overnight vitals | Device-, region-, and eligibility-dependent; capture support does not prove that an account has skin-temperature, ECG, or rhythm-alert access |
 | Apple Watch | Apple Health → Google Health | Activity, sleep, exercise/routes, body data, VO₂ max, heart rate, overnight HRV/SpO₂/respiratory rate/resting heart rate | No exercise minutes, stand hours, ECG/rhythm alerts, or all-day vitals |
 | Garmin | Garmin Connect → Health Connect/Apple Health → Google Health | Activity, sleep, exercise summaries, heart/resting heart rate, weight | No HRV, respiratory rate, SpO₂, VO₂ max, skin temperature, routes, or lap details |
 | Mi Fitness / Xiaomi | Health Connect → Google Health; Android only | Exercise heart rate, activity, sleep, exercise/maps, weight | No HRV, respiratory rate, SpO₂, VO₂ max, skin temperature, or heart rate outside exercise |
@@ -124,28 +126,28 @@ For an image of a report or device screen:
 
 ## OAuth and scope hygiene
 
-Use only required read scopes from Google's [scope reference](https://developers.google.com/health/scopes). OHA's current 14 mapped query families need only `activity_and_fitness.readonly`, `health_metrics_and_measurements.readonly`, and `sleep.readonly`; the upstream `readonly` preset is broader and also includes categories OHA does not import. Keep OAuth client JSON, client secrets, authorization URLs and codes, refresh tokens, pending-auth files, and raw responses outside the repository, chat, and ordinary logs.
+Use only required read scopes from Google's [scope reference](https://developers.google.com/health/scopes). The 40-type capture registry uses `activity_and_fitness.readonly`, `health_metrics_and_measurements.readonly`, `sleep.readonly`, `nutrition.readonly`, `ecg.readonly`, and `irn.readonly`. ECG and IRN are separate sensitive scopes and may remain unavailable for an account or project. The upstream `readonly` preset is broader because it also includes profile, settings, and location, which OHA does not read. Keep OAuth client JSON, client secrets, authorization URLs and codes, refresh tokens, pending-auth files, and raw responses outside the repository, chat, and ordinary logs.
 
 This project's pinned `ghealth` flow uses a **Desktop application** OAuth client with loopback/PKCE. First read the instructions emitted by the installed version, then configure it:
 
 ```bash
 ghealth setup --instructions
-ghealth setup --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
+ghealth setup --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly,nutrition.readonly,ecg.readonly,irn.readonly
 ```
 
-Add the same three full Google Health scopes in Google Cloud under **OAuth consent screen → Data Access → Add or remove scopes**. If the project is in Testing, add the synchronizing account under **Audience → Test users**. The CLI flag limits the local authorization request; it cannot edit the Cloud consent screen.
+Add the same six full Google Health scopes in Google Cloud under **OAuth consent screen → Data Access → Add or remove scopes**. If the project is in Testing, add the synchronizing account under **Audience → Test users**. The CLI flag limits the local authorization request; it cannot edit the Cloud consent screen.
 
 On a computer with a browser, authenticate and validate with:
 
 ```bash
-ghealth auth login --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
+ghealth auth login --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly,nutrition.readonly,ecg.readonly,irn.readonly
 ghealth auth status --validate
 ```
 
 For a headless shell, use the same Desktop client and complete the exact flow emitted by `ghealth`:
 
 ```bash
-ghealth auth login --non-interactive --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
+ghealth auth login --non-interactive --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly,nutrition.readonly,ecg.readonly,irn.readonly
 ghealth auth login --complete '<code>'
 ghealth auth status --validate
 ```

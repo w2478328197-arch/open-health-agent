@@ -10,6 +10,7 @@ from .config import Config, load_profile
 from .constants import DAILY_FIELD_MAP, SUMMARY_NUTRIENT_FIELDS
 from .database import HealthDatabase
 from .energy import estimated_ree, planning_intake, retrospective_tdee, tef_from_macros
+from .ghealth_adapter import SUPPORTED_CAPTURE_DATA_TYPES
 from .profile import profile_invalid_fields
 from .state import state_validation_error
 
@@ -172,6 +173,7 @@ def build_context(config: Config, database: HealthDatabase, target_date: str | N
     workouts = database.list_records("workout", from_date=start_28, to_date=today)
     foods = database.list_records("food", from_date=today, to_date=today)
     goals = database.list_records("goal")
+    wearable_coverage = database.wearable_coverage()
     profile_projection_available = True
     try:
         loaded_profile = load_profile(config)
@@ -310,6 +312,21 @@ def build_context(config: Config, database: HealthDatabase, target_date: str | N
         gaps.append("no ghealth sync run recorded")
     elif latest.get("status") != "success":
         gaps.append(f"latest sync status is {latest.get('status')}")
+    captured_type_count = len(wearable_coverage)
+    failed_capture_types = [
+        row
+        for row in wearable_coverage
+        if row.get("status") in {"partial", "failed"}
+    ]
+    if latest is not None and captured_type_count < len(SUPPORTED_CAPTURE_DATA_TYPES):
+        gaps.append(
+            "wearable capture coverage is "
+            f"{captured_type_count}/{len(SUPPORTED_CAPTURE_DATA_TYPES)} data types"
+        )
+    if failed_capture_types:
+        gaps.append(
+            f"{len(failed_capture_types)} wearable data type(s) had a failed query"
+        )
     if freshness_hours is not None and freshness_hours > 6:
         gaps.append(f"latest successful sync is {freshness_hours:.1f} hours old")
     if not foods:
@@ -349,6 +366,28 @@ def build_context(config: Config, database: HealthDatabase, target_date: str | N
         projected
         for row in workouts[-100:]
         if (projected := _project(row, _WORKOUT_CONTEXT_FIELDS)) is not None
+    ]
+    safe_wearable_coverage = [
+        projected
+        for row in wearable_coverage
+        if (
+            projected := _project(
+                row,
+                (
+                    "data_type",
+                    "operations",
+                    "grains",
+                    "status",
+                    "record_count",
+                    "first_date",
+                    "last_date",
+                    "data_until",
+                    "source_count",
+                    "failed_query_count",
+                ),
+            )
+        )
+        is not None
     ]
 
     return {
@@ -397,6 +436,15 @@ def build_context(config: Config, database: HealthDatabase, target_date: str | N
                 "active_energy_completed_days": len(active_values),
                 "workout_records": len(workouts),
             },
+            "wearable_capture": {
+                "supported_data_types": len(SUPPORTED_CAPTURE_DATA_TYPES),
+                "checked_data_types": captured_type_count,
+                "streams": safe_wearable_coverage,
+                "decision_policy": (
+                    "coverage metadata only; raw samples and waveforms require "
+                    "explicit semantic mapping before analysis"
+                ),
+            },
             "completed_7d_active_energy_values": active_values,
             "average_completed_active_energy_kcal": round(average_active, 1) if average_active is not None else None,
         },
@@ -429,6 +477,7 @@ def build_context(config: Config, database: HealthDatabase, target_date: str | N
                 "original food/measurement/workout wording",
                 "image references",
                 "free-form notes",
+                "raw wearable samples and ECG waveforms",
                 "sync batch IDs",
                 "import timestamps",
             ],
