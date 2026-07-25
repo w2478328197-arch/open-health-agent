@@ -74,6 +74,35 @@ def test_stable_normalization_and_database_upsert_deduplicate_reimports(tmp_path
         assert len(database.list_records("workout")) == 1
 
 
+def test_equal_daily_values_still_advance_the_source_freshness_cutoff(
+    tmp_path: Path,
+) -> None:
+    record_id = "2026-01-02"
+    first = {
+        "record_id": record_id,
+        "date": record_id,
+        "steps": 4321,
+        "batch_id": "batch-one",
+        "imported_at": "2026-01-02T08:00:00+00:00",
+        "data_until": "2026-01-02T08:00:00+00:00",
+    }
+    second = first | {
+        "batch_id": "batch-two",
+        "imported_at": "2026-01-02T09:00:00+00:00",
+        "data_until": "2026-01-02T09:00:00+00:00",
+    }
+
+    with HealthDatabase(tmp_path / "health.sqlite3") as database:
+        database.upsert("daily", first, record_id)
+        database.upsert("daily", second, record_id)
+        stored = database.get("daily", record_id)
+
+    assert stored is not None
+    assert stored["batch_id"] == "batch-two"
+    assert stored["imported_at"].endswith("09:00:00+00:00")
+    assert stored["data_until"].endswith("09:00:00+00:00")
+
+
 def test_redaction_removes_oauth_material() -> None:
     oauth_prefix = "ya" + "29."
     sample = f"access_token=secret-value authorization: Bearer-value code=oauth-code {oauth_prefix}synthetic-token"
@@ -327,3 +356,22 @@ def test_command_runner_forces_json_format_environment(
     monkeypatch.setenv("GHEALTH_FORMAT", "table")
 
     assert CommandRunner(str(executable)).run([]) == {"format": "json"}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="executable script fixture uses a POSIX shebang")
+def test_command_runner_pins_one_profile_for_every_subprocess(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executable = tmp_path / "fake-ghealth"
+    executable.write_text(
+        f"#!{Path(sys.executable).resolve()}\n"
+        "import json, os\n"
+        "print(json.dumps({'profile': os.environ.get('GHEALTH_PROFILE')}))\n",
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    monkeypatch.setenv("GHEALTH_PROFILE", "ambient-profile")
+
+    assert CommandRunner(str(executable), profile="pinned-profile").run([]) == {
+        "profile": "pinned-profile"
+    }

@@ -54,7 +54,7 @@ jobs:
           sh -n install.sh
           sh -n scripts/install_ghealth.sh
           grep -Fq 'https://github.com/Google-Health-API/google-health-cli.git' scripts/install_ghealth.sh
-          grep -Fq '6dad482c528b91d6562eadc829fd3e717df5b75a' scripts/install_ghealth.sh
+          python scripts/update_ghealth_pin.py --verify
           scripts/install_ghealth.sh --dry-run
 
       - name: Compile Python sources

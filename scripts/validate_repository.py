@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import unquote
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,9 +17,12 @@ SKILL_ROOT = ROOT / "skills" / "open-health-agent"
 
 REQUIRED_FILES = (
     ROOT / "README.md",
+    ROOT / "README_EN.md",
     ROOT / "LICENSE",
     ROOT / "PRIVACY.md",
+    ROOT / "PRIVACY.zh-CN.md",
     ROOT / "SECURITY.md",
+    ROOT / "SECURITY.zh-CN.md",
     ROOT / "install.sh",
     ROOT / "requirements-dev.txt",
     SKILL_ROOT / "SKILL.md",
@@ -112,6 +116,60 @@ def validate_openai_yaml(validation: Validation) -> None:
     for key in ("display_name:", "short_description:", "default_prompt:"):
         validation.require(key in text, f"agents/openai.yaml is missing {key[:-1]}")
     validation.require("$open-health-agent" in text, "default_prompt must explicitly mention $open-health-agent")
+
+
+def validate_project_metadata(validation: Validation) -> None:
+    constants_path = SKILL_ROOT / "scripts" / "oha" / "constants.py"
+    if not constants_path.exists():
+        return
+    match = re.search(
+        r'^APP_VERSION\s*=\s*["\']([^"\']+)["\']',
+        constants_path.read_text(encoding="utf-8"),
+        flags=re.MULTILINE,
+    )
+    validation.require(match is not None, "constants.py must declare APP_VERSION")
+    if match is None:
+        return
+
+    version = match.group(1)
+    for path in (ROOT / "README.md", ROOT / "README_EN.md"):
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        validation.require(
+            f"version-{version}" in text,
+            f"{path.name} version badge must match APP_VERSION {version}",
+        )
+        validation.require("Python-3.10%2B" in text, f"{path.name} must show the Python 3.10+ requirement")
+        validation.require("Apache--2.0" in text, f"{path.name} must show the Apache-2.0 license")
+        validation.require("README_EN.md" in text and "README.md" in text, f"{path.name} must link both languages")
+        validation.require("SECURITY" in text and "PRIVACY" in text, f"{path.name} must link security and privacy notices")
+
+
+def validate_public_markdown_links(validation: Validation) -> None:
+    paths = (
+        ROOT / "README.md",
+        ROOT / "README_EN.md",
+        ROOT / "SECURITY.md",
+        ROOT / "SECURITY.zh-CN.md",
+        ROOT / "PRIVACY.md",
+        ROOT / "PRIVACY.zh-CN.md",
+    )
+    for path in paths:
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        for target in re.findall(r"\[[^\]]*\]\(([^)]+)\)", text):
+            target = target.strip()
+            if not target or target.startswith(("http://", "https://", "mailto:", "#")):
+                continue
+            local_target = unquote(target.split("#", 1)[0])
+            if not local_target:
+                continue
+            validation.require(
+                (path.parent / local_target).exists(),
+                f"{path.name} has a broken relative link: {target}",
+            )
 
 
 def validate_profile_example(validation: Validation) -> None:
@@ -208,6 +266,8 @@ def main() -> int:
         validation.require(path.exists(), f"missing required file: {path.relative_to(ROOT)}")
     validate_skill(validation)
     validate_openai_yaml(validation)
+    validate_project_metadata(validation)
+    validate_public_markdown_links(validation)
     validate_profile_example(validation)
     validate_workbook(validation)
     validate_python(validation)

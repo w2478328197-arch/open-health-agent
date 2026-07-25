@@ -1,5 +1,7 @@
 # Security policy
 
+[English](SECURITY.md) · [简体中文](SECURITY.zh-CN.md) · [Project home](README_EN.md)
+
 ## Supported versions
 
 Until the first stable release, only the latest commit on `main` is supported. Security fixes may change the private schema or installer; read release notes and keep a local backup before updating.

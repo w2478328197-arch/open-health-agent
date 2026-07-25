@@ -2,7 +2,7 @@
 set -eu
 
 REPOSITORY="https://github.com/Google-Health-API/google-health-cli.git"
-COMMIT="6dad482c528b91d6562eadc829fd3e717df5b75a"
+COMMIT="9cf02743d9ca051500b7c1c181eb88a9ae8988a5"
 INSTALL_DIR=${XDG_BIN_HOME:-"$HOME/.local/bin"}
 DRY_RUN=0
 FORCE=0

@@ -19,13 +19,26 @@ logs/
 *.sqlite3
 *.sqlite3-shm
 *.sqlite3-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+*.db-shm
+*.db-wal
 *.xlsx
 !skills/open-health-agent/assets/health-ledger.xlsx
 *.xls
+*.docx
+*.pdf
 *.csv
 *.jsonl
+*.log
 *.env
 .env*
+AGENTS.md
+profile.json
+config.json
+state.json
 credentials.json
 client_secret*.json
 pending_auth.json
@@ -38,6 +51,10 @@ tokens.json
 *.wav
 *.m4a
 *.mp3
+*.silk
+*.mp4
+*.mov
+*.webm
 
 # Generated validation artifacts.
 artifacts/

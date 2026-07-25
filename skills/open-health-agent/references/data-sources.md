@@ -1,5 +1,16 @@
 # Data sources and wearable chain
 
+## Contents
+
+- [Canonical wearable path](#canonical-wearable-path)
+- [What supported means](#what-supported-means)
+- [Upstream types, OHA mappings, and device paths](#upstream-types-oha-mappings-and-device-paths)
+- [Freshness and dates](#freshness-and-dates)
+- [Source semantics](#source-semantics)
+- [Manual text, voice, and photo](#manual-text-voice-and-photo)
+- [Measurements outside Google Health](#measurements-outside-google-health)
+- [OAuth and scope hygiene](#oauth-and-scope-hygiene)
+
 ## Canonical wearable path
 
 `ghealth` is a command-line client under the [Google-Health-API GitHub organization](https://github.com/Google-Health-API/google-health-cli). This project uses it to query the cloud [Google Health API](https://developers.google.com/health). It is not a direct API for Health Connect, Apple Health, Garmin Connect, Mi Fitness, or a watch.
@@ -27,6 +38,30 @@ Google's [device and app connection guide](https://support.google.com/googleheal
 
 For Xiaomi and other manufacturers, verify the current Google matrix and the manufacturer's Health Connect/Apple Health export behavior. A brand name alone is not proof that HRV, sleep stages, SpO₂, VO₂ max, workout routes, or active energy will arrive.
 
+## Upstream types, OHA mappings, and device paths
+
+The pinned `ghealth` upstream release documents 40 verified API data types. OHA currently maps only these 14 query families:
+
+`steps`, `distance`, `active-energy-burned`, `active-minutes`, `daily-resting-heart-rate`, `daily-heart-rate-variability`, `daily-oxygen-saturation`, `daily-respiratory-rate`, `daily-vo2-max`, `weight`, `body-fat`, `height`, `sleep --detail`, and `exercise`.
+
+Do not claim that the other upstream types are automatically imported. The current gaps include continuous heart rate, floors, altitude, heart-rate zones, sedentary periods, swimming, basal/total energy, glucose, temperature, sleep temperature, ECG, irregular-rhythm notifications, and Google Health hydration/nutrition logs. Exercise summaries may contain average/max heart rate; that is not the continuous heart-rate stream.
+
+The following table was verified against Google's official device page on 2026-07-14. It describes paths into Google Health, not a permanent hardware certification.
+
+| Source | Path | Representative data Google documents | Explicit gaps or conditions |
+|---|---|---|---|
+| Fitbit / Pixel Watch | Google first-party path | Activity, sleep, exercise, resting heart rate, and supported overnight vitals | Device-, region-, and eligibility-dependent; OHA does not map continuous heart rate, skin temperature, ECG, or rhythm alerts |
+| Apple Watch | Apple Health → Google Health | Activity, sleep, exercise/routes, body data, VO₂ max, heart rate, overnight HRV/SpO₂/respiratory rate/resting heart rate | No exercise minutes, stand hours, ECG/rhythm alerts, or all-day vitals |
+| Garmin | Garmin Connect → Health Connect/Apple Health → Google Health | Activity, sleep, exercise summaries, heart/resting heart rate, weight | No HRV, respiratory rate, SpO₂, VO₂ max, skin temperature, routes, or lap details |
+| Mi Fitness / Xiaomi | Health Connect → Google Health; Android only | Exercise heart rate, activity, sleep, exercise/maps, weight | No HRV, respiratory rate, SpO₂, VO₂ max, skin temperature, or heart rate outside exercise |
+| Samsung Galaxy Watch | Samsung Health → Health Connect → Google Health; Android only | Activity, sleep, exercise, heart rate, SpO₂, VO₂ max, weight | No resting heart rate, HRV, respiratory rate, skin temperature, routes/laps; extra Samsung health-data-processing consent required |
+| Oura | Oura App → Health Connect/Apple Health → Google Health | Activity, sleep, exercise summaries, heart rate, HRV, weight | No resting heart rate, respiratory rate, SpO₂, VO₂ max, skin temperature, routes/laps; OHA does not query ordinary heart rate |
+| Whoop | Whoop App → Health Connect → Google Health; Android only | Activity, sleep, exercise, resting heart rate, respiratory rate, SpO₂, weight | No HRV, VO₂ max, skin temperature, out-of-exercise heart rate, routes/laps |
+| Withings | Withings App → Health Connect/Apple Health → Google Health | Verify each metric | Google explicitly says Withings blood pressure is not yet supported; record it manually |
+| Zepp / Amazfit | Zepp → Health Connect/Apple Health → Google Health | Activity, sleep, exercise, resting heart rate, weight, respiratory rate, VO₂ max, SpO₂, routes | No HRV, skin temperature, floors, lap details, or rhythm alerts |
+
+Always re-check [Google's current device compatibility page](https://support.google.com/googlehealth/answer/14236613?hl=en) and the installed `ghealth schema types` output after an upstream change.
+
 ## Freshness and dates
 
 - “The job ran this hour” does not mean “the device uploaded this hour.” Phones may be offline, manufacturer apps may wait for foreground sync, and cloud processing may lag.
@@ -38,6 +73,7 @@ For Xiaomi and other manufacturers, verify the current Google matrix and the man
 - Assign sleep to the wake/end date. `实际睡眠时长_h` means time asleep and excludes awake minutes; prefer an explicit `minutesAsleep`, otherwise sum compatible asleep stages, or subtract known awake time from a compatible in-bed total. Do not add overlapping sleep sessions from multiple sources. Select one coherent session/source according to configured priority and retain the chosen source.
 - Label current-day health and energy as “截至目前/partial.” Use completed days for baselines.
 - Record the source's data cutoff separately from the local import time. Compare real timestamps as timezone-aware instants, and calculate the cutoff independently for each daily row; a partial import must identify stale retained fields rather than applying one global cutoff to every date.
+- Treat a real import as a two-phase operation around external `ghealth` work. Under the writer lock, pin only local consent, configuration, date range, and the local runtime snapshot; resolve and recheck selected profile/account identity, timezone, account-bound fingerprint, and the network fetch outside the lock; then reacquire it and revalidate the local snapshot before applying rows. If consent is withdrawn or identity/configuration drifts, reject the fetched batch before persistence. This keeps slow external reads and identity checks from blocking unrelated manual writes without weakening authorization checks.
 
 ## Source semantics
 
@@ -72,7 +108,7 @@ A photo requires a vision-capable model or vision tool. Store:
 - confidence and uncertainty note;
 - a local media reference if the user allows retention.
 
-In a dedicated health or diet conversation, a standalone close-up meal photo can default to a consumed-food log when there are no cues that it is a purchase, menu, recipe, unopened product, eating plan, leftover-only image, or background object. Briefly echo the items that will be counted before writing. Ask one targeted question only when identity or consumption is materially ambiguous; do not ask the user to weigh the food. Outside that narrow convention, a photo alone is not proof of consumption. A photo cannot reliably establish every ingredient, cooking oil, portion weight, sodium, or micronutrient; keep missing fields blank and report coverage.
+A standalone meal photo is not proof of consumption by default. In a dedicated health or diet conversation it can become a consumed-food log without repeated confirmation only after the user explicitly adopts that convention and it is saved in private `AGENTS.md`. Even with that opt-in, purchase, menu, recipe, unopened-product, eating-plan, leftover-only, or background-object cues block automatic logging. Briefly echo the items and portion range before writing. Without the saved opt-in, or when identity/context is materially ambiguous, ask one targeted question; do not ask the user to weigh the food. A photo cannot reliably establish every ingredient, cooking oil, portion weight, sodium, or micronutrient; keep missing fields blank and report coverage.
 
 ## Measurements outside Google Health
 
@@ -88,28 +124,30 @@ For an image of a report or device screen:
 
 ## OAuth and scope hygiene
 
-Use only required read scopes from Google's [scope reference](https://developers.google.com/health/scopes). Keep OAuth client JSON, client secrets, authorization URLs and codes, refresh tokens, pending-auth files, and raw responses outside the repository, chat, and ordinary logs.
+Use only required read scopes from Google's [scope reference](https://developers.google.com/health/scopes). OHA's current 14 mapped query families need only `activity_and_fitness.readonly`, `health_metrics_and_measurements.readonly`, and `sleep.readonly`; the upstream `readonly` preset is broader and also includes categories OHA does not import. Keep OAuth client JSON, client secrets, authorization URLs and codes, refresh tokens, pending-auth files, and raw responses outside the repository, chat, and ordinary logs.
 
 This project's pinned `ghealth` flow uses a **Desktop application** OAuth client with loopback/PKCE. First read the instructions emitted by the installed version, then configure it:
 
 ```bash
 ghealth setup --instructions
-ghealth setup --scopes-preset readonly
+ghealth setup --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
 ```
+
+Add the same three full Google Health scopes in Google Cloud under **OAuth consent screen → Data Access → Add or remove scopes**. If the project is in Testing, add the synchronizing account under **Audience → Test users**. The CLI flag limits the local authorization request; it cannot edit the Cloud consent screen.
 
 On a computer with a browser, authenticate and validate with:
 
 ```bash
-ghealth auth login --scopes-preset readonly
+ghealth auth login --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
 ghealth auth status --validate
 ```
 
 For a headless shell, use the same Desktop client and complete the exact flow emitted by `ghealth`:
 
 ```bash
-ghealth auth login --non-interactive --scopes-preset readonly
+ghealth auth login --non-interactive --scopes activity_and_fitness.readonly,health_metrics_and_measurements.readonly,sleep.readonly
 ghealth auth login --complete '<code>'
 ghealth auth status --validate
 ```
 
-Google's generic [Health API setup page](https://developers.google.com/health/setup) currently describes a **Web Server** OAuth client and a `https://www.google.com` redirect for developers writing direct API clients. Do not use that Web client as a substitute for `ghealth`'s Desktop client: the callback model is different, including in headless mode. OAuth consent screens left in **Testing** may issue refresh tokens that expire after about seven days; distinguish that expiration from an empty health dataset. Treat restricted scopes and production verification as deployment requirements, not optional polish. The [Google Health API data policy](https://developers.google.com/health/policies/health-api-developer-user-data-policy) applies in addition to this project's privacy rules.
+Google's generic [Health API setup page](https://developers.google.com/health/setup) currently describes a **Web Server** OAuth client and a `https://www.google.com` redirect for developers writing direct API clients. Do not use that Web client as a substitute for `ghealth`'s Desktop client: the callback model is different, including in headless mode. OAuth consent screens left in **Testing** may issue refresh tokens that expire after about seven days; distinguish that expiration from an empty health dataset. This project does not send an expiry alert, so during Testing inspect authorization and scheduler status at least weekly and investigate a last-success time older than two configured intervals. Treat restricted scopes and production verification as deployment requirements, not optional polish. The [Google Health API data policy](https://developers.google.com/health/policies/health-api-developer-user-data-policy) applies in addition to this project's privacy rules.

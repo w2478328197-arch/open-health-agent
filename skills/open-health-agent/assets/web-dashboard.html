@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Open Health · 原始数据</title>
+  <style>
+    :root{--bg:#08090a;--panel:#0f1011;--surface:#191a1b;--surface2:#212226;--text:#f7f8f8;--muted:#8a8f98;--soft:#62666d;--line:rgba(255,255,255,.08);--line2:rgba(255,255,255,.05);--accent:#7170ff;--accent2:#5e6ad2;--ok:#10b981;--warn:#f59e0b;--radius:10px}
+    *{box-sizing:border-box}
+    html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:Inter,-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif;font-feature-settings:"cv01","ss03"}
+    body{background:radial-gradient(900px 500px at 70% -15%,rgba(113,112,255,.12),transparent 70%),var(--bg)}
+    button,input{font:inherit} button{color:inherit}
+    .shell{min-height:100vh;display:grid;grid-template-columns:240px minmax(0,1fr)}
+    aside{position:sticky;top:0;height:100vh;padding:22px 16px;border-right:1px solid var(--line2);background:rgba(15,16,17,.8);backdrop-filter:blur(18px)}
+    .brand{display:flex;gap:11px;align-items:center;padding:0 8px 22px}.mark{width:30px;height:30px;border-radius:9px;background:linear-gradient(145deg,#8b8aff,#4b49ba);box-shadow:0 0 25px rgba(113,112,255,.22);display:grid;place-items:center;font-weight:590}.brand b{font-size:14px;font-weight:590}.brand small{display:block;color:var(--soft);font-size:11px;margin-top:2px}
+    .nav-label{padding:14px 10px 7px;color:var(--soft);font:500 10px ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.1em}
+    .nav{display:grid;gap:4px}.nav button{width:100%;border:0;background:transparent;border-radius:7px;padding:9px 10px;display:flex;justify-content:space-between;align-items:center;color:var(--muted);cursor:pointer;text-align:left;font-size:13px}.nav button:hover{background:rgba(255,255,255,.04);color:var(--text)}.nav button.active{background:rgba(113,112,255,.12);color:#dedfff}.count{font:500 11px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--soft)}
+    .subnav{display:none;margin:7px 0 10px 14px;padding:4px 0 4px 10px;border-left:1px solid rgba(113,112,255,.28);gap:2px}.subnav.show{display:grid}.subnav button{width:100%;border:0;background:transparent;color:var(--soft);padding:7px 9px;border-radius:6px;display:flex;justify-content:space-between;cursor:pointer;font-size:12px;text-align:left}.subnav button:hover{color:var(--text);background:rgba(255,255,255,.03)}.subnav button.active{color:#c8caff;background:rgba(113,112,255,.09)}.subnav .subcount{font:500 10px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--soft)}
+    .privacy{position:absolute;left:16px;right:16px;bottom:18px;padding:12px;border:1px solid var(--line2);border-radius:9px;background:rgba(255,255,255,.02);color:var(--muted);font-size:11px;line-height:1.55}.privacy .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 10px rgba(16,185,129,.5);margin-right:6px}
+    main{min-width:0;padding:36px 38px 60px}.topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:28px}.eyebrow{color:var(--accent);font:500 11px ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.1em;margin-bottom:9px}h1{font-size:32px;line-height:1.1;letter-spacing:-.7px;font-weight:510;margin:0 0 8px}.subtitle{color:var(--muted);font-size:14px;margin:0}.readonly{border:1px solid rgba(16,185,129,.2);background:rgba(16,185,129,.08);color:#83e5c2;padding:7px 10px;border-radius:999px;font-size:11px;white-space:nowrap}
+    .cards{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:10px;margin-bottom:20px}.card{padding:16px;border:1px solid var(--line);border-radius:var(--radius);background:rgba(255,255,255,.025);min-height:100px}.card .label{color:var(--muted);font-size:12px}.card .value{font-size:27px;font-weight:510;letter-spacing:-.6px;margin-top:11px}.card .hint{color:var(--soft);font:400 10px ui-monospace,SFMono-Regular,Menlo,monospace;margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .panel{border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.018);overflow:hidden}.toolbar{padding:12px;display:grid;grid-template-columns:minmax(180px,1fr) 150px 150px auto;gap:8px;border-bottom:1px solid var(--line2)}.field{height:36px;border:1px solid var(--line);border-radius:7px;background:rgba(255,255,255,.025);color:var(--text);padding:0 11px;outline:none;font-size:12px}.field:focus{border-color:rgba(113,112,255,.55);box-shadow:0 0 0 3px rgba(113,112,255,.1)}.field::-webkit-calendar-picker-indicator{filter:invert(1);opacity:.45}.refresh{height:36px;border:1px solid var(--line);border-radius:7px;background:rgba(255,255,255,.04);padding:0 14px;cursor:pointer;font-size:12px}.refresh:hover{background:rgba(255,255,255,.07)}
+    .table-wrap{overflow:auto;min-height:360px}table{width:100%;border-collapse:collapse;white-space:nowrap}th{position:sticky;top:0;background:#111214;color:var(--soft);text-align:left;font:500 10px ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.06em;padding:10px 14px;border-bottom:1px solid var(--line)}td{padding:12px 14px;border-bottom:1px solid var(--line2);font-size:12px;color:#d0d6e0;max-width:300px;overflow:hidden;text-overflow:ellipsis}tr:hover td{background:rgba(255,255,255,.025)}td.primary{color:var(--text);font-weight:510}.source-pill{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:3px 7px;color:var(--muted);font-size:10px}.raw-btn{border:1px solid var(--line);border-radius:6px;background:transparent;color:var(--muted);padding:4px 8px;cursor:pointer;font-size:10px}.raw-btn:hover{color:var(--text);background:rgba(255,255,255,.04)}
+    .empty{display:none;text-align:center;color:var(--soft);padding:80px 20px;font-size:13px}.footer{display:flex;justify-content:space-between;align-items:center;padding:11px 13px;color:var(--soft);font-size:11px}.pager{display:flex;gap:6px}.pager button{border:1px solid var(--line);border-radius:6px;background:rgba(255,255,255,.025);padding:5px 9px;font-size:11px;cursor:pointer}.pager button:disabled{opacity:.3;cursor:default}
+    dialog{width:min(760px,calc(100vw - 32px));max-height:80vh;border:1px solid var(--line);border-radius:12px;background:#111214;color:var(--text);padding:0;box-shadow:0 30px 100px rgba(0,0,0,.65)}dialog::backdrop{background:rgba(0,0,0,.76);backdrop-filter:blur(5px)}.modal-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid var(--line)}.modal-head strong{font-size:13px;font-weight:510}.modal-head button{border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:20px}.json{margin:0;padding:17px;overflow:auto;color:#cfd3ff;font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+    .loading{animation:pulse 1.4s ease-in-out infinite}@keyframes pulse{50%{opacity:.38}}
+    @media(max-width:1050px){.cards{grid-template-columns:repeat(3,1fr)}.toolbar{grid-template-columns:1fr 140px 140px}.refresh{grid-column:1/-1}}
+    @media(max-width:760px){.shell{display:block}aside{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line2);padding:14px}.brand{padding-bottom:10px}.nav-label,.privacy{display:none}.nav{display:flex;overflow:auto}.nav button{min-width:max-content;gap:14px}.subnav.show{display:flex;overflow:auto;margin:8px 0 0;padding:7px 0 0;border-left:0;border-top:1px solid var(--line2)}.subnav button{min-width:max-content;gap:12px}main{padding:24px 14px 40px}.topbar{align-items:center}.cards{grid-template-columns:repeat(2,1fr)}.toolbar{grid-template-columns:1fr 1fr}.toolbar .search{grid-column:1/-1}.refresh{grid-column:1/-1}.card{min-height:88px}.card .value{font-size:24px}}
+  </style>
+</head>
+<body>
+<div class="shell">
+  <aside>
+    <div class="brand"><div class="mark">H</div><div><b>Open Health</b><small>Private data explorer</small></div></div>
+    <div class="nav-label">数据集合</div>
+    <nav class="nav" id="nav">
+      <button class="active" data-kind="all">全部记录 <span class="count" data-count="all">—</span></button>
+      <button data-kind="daily">健康日报 <span class="count" data-count="daily">—</span></button>
+      <button data-kind="measurement">健康测量 <span class="count" data-count="measurement">—</span></button>
+      <button data-kind="workout">训练记录 <span class="count" data-count="workout">—</span></button>
+      <button data-kind="food">饮食记录 <span class="count" data-count="food">—</span></button>
+      <button data-kind="goal">健康目标 <span class="count" data-count="goal">—</span></button>
+    </nav>
+    <div class="subnav" id="subnav" aria-label="子分类"></div>
+    <div class="privacy"><span class="dot"></span>仅限本机 · 只读模式<br>数据不会离开这台 Mac</div>
+  </aside>
+  <main>
+    <header class="topbar"><div><div class="eyebrow">Localhost / SQLite</div><h1>原始数据</h1><p class="subtitle">直接浏览唯一真源中的健康记录，不经过 Excel。</p></div><span class="readonly">● READ ONLY</span></header>
+    <section class="cards">
+      <article class="card"><div class="label">全部记录</div><div class="value loading" id="total">—</div><div class="hint" id="range">读取中</div></article>
+      <article class="card"><div class="label">健康日报</div><div class="value loading" id="dailyCount">—</div><div class="hint">daily snapshots</div></article>
+      <article class="card"><div class="label">健康测量</div><div class="value loading" id="measurementCount">—</div><div class="hint">measurements</div></article>
+      <article class="card"><div class="label">训练记录</div><div class="value loading" id="workoutCount">—</div><div class="hint">workouts</div></article>
+      <article class="card"><div class="label">饮食记录</div><div class="value loading" id="foodCount">—</div><div class="hint" id="syncHint">等待同步状态</div></article>
+    </section>
+    <section class="panel">
+      <div class="toolbar">
+        <input class="field search" id="search" type="search" placeholder="搜索食物、指标、来源或原话…" autocomplete="off">
+        <input class="field" id="fromDate" type="date" aria-label="开始日期">
+        <input class="field" id="toDate" type="date" aria-label="结束日期">
+        <button class="refresh" id="refresh">刷新数据</button>
+      </div>
+      <div class="table-wrap"><table><thead><tr id="head"></tr></thead><tbody id="body"></tbody></table><div class="empty" id="empty">没有符合条件的记录</div></div>
+      <div class="footer"><span id="pageInfo">读取中…</span><div class="pager"><button id="prev">上一页</button><button id="next">下一页</button></div></div>
+    </section>
+  </main>
+</div>
+<dialog id="detail"><div class="modal-head"><strong>原始记录 · JSON</strong><button id="close" aria-label="关闭">×</button></div><pre class="json" id="json"></pre></dialog>
+<script>
+const state={kind:'all',subtype:null,offset:0,limit:50,total:0};
+let summaryCache={counts:{},subcategories:{}};
+const labels={date:'日期',time:'时间',metric:'指标',value:'数值',second_value:'第二数值',unit:'单位',source:'来源',food_name:'食物',meal:'餐次',estimated_grams:'估算克数',workout_type:'训练类型',duration_minutes:'时长(min)',calories_kcal:'热量(kcal)',sleep_hours:'睡眠(h)',sleep_start:'入睡',sleep_end:'醒来',awake_minutes:'清醒(min)',deep_minutes:'深睡(min)',light_minutes:'浅睡(min)',rem_minutes:'REM(min)',steps:'步数',distance_km:'距离(km)',active_energy_kcal:'活动热量',active_minutes:'活动(min)',resting_heart_rate_bpm:'静息心率',hrv_ms:'HRV(ms)',respiratory_rate:'呼吸频率',spo2_percent:'血氧(%)',vo2max:'VO₂max',weight_kg:'体重(kg)',body_fat_percent:'体脂率(%)',height_cm:'身高(cm)',original_text:'原话',text:'目标',effective_date:'生效日期'};
+const columns={
+ all:['date','_kind','metric','food_name','workout_type','value','unit','_source'],
+ daily:['date','sleep_hours','steps','active_energy_kcal','resting_heart_rate_bpm','hrv_ms','vo2max'],
+ measurement:['date','time','metric','value','second_value','unit','_source'],
+ workout:['date','start_time','workout_type','duration_minutes','distance_km','calories_kcal','average_heart_rate_bpm'],
+ food:['date','time','meal','food_name','estimated_grams','summary_nutrients','_source'],
+ goal:['effective_date','text','priority','status','_source']
+};
+const dailyColumns={
+ sleep:['date','sleep_hours','sleep_start','sleep_end','awake_minutes','deep_minutes','light_minutes','rem_minutes'],
+ activity:['date','steps','distance_km','active_energy_kcal','active_minutes'],
+ recovery:['date','resting_heart_rate_bpm','hrv_ms','respiratory_rate','spo2_percent','vo2max'],
+ body:['date','weight_kg','body_fat_percent','height_cm']
+};
+const kindName={daily:'日报',measurement:'测量',workout:'训练',food:'饮食',goal:'目标'};
+const $=id=>document.getElementById(id);
+const format=v=>v===null||v===undefined||v===''?'—':typeof v==='object'?JSON.stringify(v):String(v);
+const currentColumns=()=>state.kind==='daily'&&state.subtype?(dailyColumns[state.subtype]||columns.daily):(columns[state.kind]||columns.all);
+async function getJSON(url){const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw new Error('request failed');return r.json()}
+function buildSubnav(){
+ const root=$('subnav');root.replaceChildren();const entries=(summaryCache.subcategories||{})[state.kind]||[];
+ if(state.kind==='all'||!entries.length){root.classList.remove('show');return}
+ const options=[{value:null,label:'全部',count:(summaryCache.counts||{})[state.kind]||0},...entries];
+ options.forEach(option=>{const b=document.createElement('button');if(state.subtype===option.value)b.classList.add('active');const label=document.createElement('span');label.textContent=option.label;const count=document.createElement('span');count.className='subcount';count.textContent=option.count;b.append(label,count);b.addEventListener('click',()=>{state.subtype=option.value;state.offset=0;buildSubnav();loadRecords()});root.appendChild(b)});root.classList.add('show');
+}
+async function loadSummary(){
+ const s=await getJSON('/api/summary');summaryCache=s;const c=s.counts||{};
+ $('total').textContent=s.total_records??0;$('dailyCount').textContent=c.daily??0;$('measurementCount').textContent=c.measurement??0;$('workoutCount').textContent=c.workout??0;$('foodCount').textContent=c.food??0;
+ document.querySelectorAll('[data-count]').forEach(el=>{const k=el.dataset.count;el.textContent=k==='all'?(s.total_records??0):(c[k]??0)});
+ document.querySelectorAll('.value').forEach(el=>el.classList.remove('loading'));
+ const dates=Object.values(s.ranges||{}).flatMap(v=>[v.first,v.last]).filter(Boolean).sort();$('range').textContent=dates.length?`${dates[0]} → ${dates[dates.length-1]}`:'暂无日期';
+ const sync=s.latest_sync;$('syncHint').textContent=sync?`同步 ${sync.status} · ${(sync.finished_at||'').slice(0,16).replace('T',' ')}`:'暂无同步记录';buildSubnav();
+}
+function buildQuery(){const p=new URLSearchParams({kind:state.kind,limit:String(state.limit),offset:String(state.offset)});if(state.subtype)p.set('subtype',state.subtype);if($('fromDate').value)p.set('from',$('fromDate').value);if($('toDate').value)p.set('to',$('toDate').value);if($('search').value.trim())p.set('q',$('search').value.trim());return p}
+function render(data){
+ state.total=data.total;const cols=currentColumns();const head=$('head');const body=$('body');head.replaceChildren();body.replaceChildren();
+ [...cols,'_raw'].forEach(key=>{const th=document.createElement('th');th.textContent=key==='_raw'?'原始值':labels[key]||(key==='_kind'?'类型':key.replace(/^_/,'').replaceAll('_',' '));head.appendChild(th)});
+ data.items.forEach(item=>{const tr=document.createElement('tr');cols.forEach((key,i)=>{const td=document.createElement('td');if(i===0)td.className='primary';const value=key==='_kind'?(kindName[item[key]]||item[key]):item[key];if(key==='_source'){const pill=document.createElement('span');pill.className='source-pill';pill.textContent=format(value);td.appendChild(pill)}else{td.textContent=format(value);td.title=format(value)}tr.appendChild(td)});const td=document.createElement('td');const b=document.createElement('button');b.className='raw-btn';b.textContent='{ }';b.addEventListener('click',()=>{$('json').textContent=JSON.stringify(item,null,2);$('detail').showModal()});td.appendChild(b);tr.appendChild(td);body.appendChild(tr)});
+ $('empty').style.display=data.items.length?'none':'block';const start=data.total?state.offset+1:0;const end=Math.min(state.offset+data.items.length,data.total);$('pageInfo').textContent=`${start}–${end} / ${data.total} 条`;$('prev').disabled=state.offset===0;$('next').disabled=state.offset+state.limit>=data.total;
+}
+async function loadRecords(){try{const data=await getJSON('/api/records?'+buildQuery());render(data)}catch(e){$('pageInfo').textContent='读取失败，请刷新';$('empty').style.display='block';$('empty').textContent='数据库暂时不可用'}}
+async function refresh(){await Promise.all([loadSummary(),loadRecords()])}
+document.querySelectorAll('[data-kind]').forEach(button=>button.addEventListener('click',()=>{document.querySelectorAll('[data-kind]').forEach(x=>x.classList.remove('active'));button.classList.add('active');state.kind=button.dataset.kind;state.subtype=null;state.offset=0;buildSubnav();loadRecords()}));
+let timer;$('search').addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(()=>{state.offset=0;loadRecords()},250)});['fromDate','toDate'].forEach(id=>$(id).addEventListener('change',()=>{state.offset=0;loadRecords()}));$('refresh').addEventListener('click',refresh);$('prev').addEventListener('click',()=>{state.offset=Math.max(0,state.offset-state.limit);loadRecords()});$('next').addEventListener('click',()=>{state.offset+=state.limit;loadRecords()});$('close').addEventListener('click',()=>$('detail').close());$('detail').addEventListener('click',e=>{if(e.target===$('detail'))$('detail').close()});
+refresh();
+</script>
+</body>
+</html>

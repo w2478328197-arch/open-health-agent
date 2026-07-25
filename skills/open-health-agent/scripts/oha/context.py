@@ -1,13 +1,130 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timedelta, timezone
 from statistics import mean
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from .config import Config, load_profile
+from .constants import DAILY_FIELD_MAP, SUMMARY_NUTRIENT_FIELDS
 from .database import HealthDatabase
 from .energy import estimated_ree, planning_intake, retrospective_tdee, tef_from_macros
+from .profile import profile_invalid_fields
+from .state import state_validation_error
+
+
+_MAX_CONTEXT_TEXT = 500
+_DAILY_CONTEXT_FIELDS = tuple(
+    field for field in DAILY_FIELD_MAP if field not in {"batch_id", "imported_at", "notes"}
+)
+_MEASUREMENT_CONTEXT_FIELDS = (
+    "date",
+    "time",
+    "metric",
+    "value",
+    "second_value",
+    "unit",
+    "source",
+    "method",
+    "confidence",
+)
+_WORKOUT_CONTEXT_FIELDS = (
+    "date",
+    "start_time",
+    "workout_type",
+    "duration_minutes",
+    "distance_km",
+    "calories_kcal",
+    "average_heart_rate_bpm",
+    "max_heart_rate_bpm",
+    "intensity_rpe",
+    "muscle_groups",
+    "training_source",
+    "method",
+    "confidence",
+)
+
+
+def _bounded_text(value: Any, limit: int = _MAX_CONTEXT_TEXT) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return value if len(value) <= limit else value[:limit] + "…"
+
+
+def _context_scalar(value: Any) -> Any:
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return _bounded_text(value)
+    if isinstance(value, list):
+        return [
+            bounded
+            for item in value[:20]
+            if (bounded := _bounded_text(item, 200)) is not None
+        ]
+    return None
+
+
+def _project(row: dict[str, Any] | None, fields: tuple[str, ...]) -> dict[str, Any] | None:
+    if not isinstance(row, dict):
+        return None
+    return {
+        field: projected
+        for field in fields
+        if field in row and (projected := _context_scalar(row.get(field))) is not None
+    }
+
+
+def _safe_food(row: dict[str, Any]) -> dict[str, Any]:
+    projected = _project(
+        row,
+        (
+            "date",
+            "time",
+            "meal",
+            "food_name",
+            "estimated_grams",
+            "grams_low",
+            "grams_high",
+            "source",
+            "confidence",
+        ),
+    ) or {}
+    summary = row.get("summary_nutrients")
+    if isinstance(summary, dict):
+        projected["summary_nutrients"] = {
+            key: float(value)
+            for key, value in summary.items()
+            if key in SUMMARY_NUTRIENT_FIELDS
+            and isinstance(value, (int, float))
+            and not isinstance(value, bool)
+        }
+    return projected
+
+
+def _safe_goal(goal: dict[str, Any]) -> dict[str, Any]:
+    return _project(
+        goal,
+        ("status", "priority", "effective_date", "original_text", "safety_constraints"),
+    ) or {}
+
+
+def _safe_sync_run(run: dict[str, Any] | None) -> dict[str, Any] | None:
+    return _project(
+        run,
+        (
+            "started_at",
+            "finished_at",
+            "from_date",
+            "to_date",
+            "status",
+            "daily_count",
+            "workout_count",
+            "measurement_count",
+            "data_until",
+        ),
+    )
 
 
 def _local_now(config: Config) -> datetime:
@@ -54,7 +171,17 @@ def build_context(config: Config, database: HealthDatabase, target_date: str | N
     measurements = database.list_records("measurement", from_date=start_28, to_date=today)
     workouts = database.list_records("workout", from_date=start_28, to_date=today)
     foods = database.list_records("food", from_date=today, to_date=today)
-    profile = load_profile(config)
+    goals = database.list_records("goal")
+    profile_projection_available = True
+    try:
+        loaded_profile = load_profile(config)
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        loaded_profile = None
+    if isinstance(loaded_profile, dict) and not profile_invalid_fields(loaded_profile):
+        profile = loaded_profile
+    else:
+        profile = {}
+        profile_projection_available = False
     sync_runs = database.list_sync_runs(limit=30)
 
     daily_by_date = {str(row.get("date")): row for row in daily if row.get("date")}
@@ -88,7 +215,12 @@ def build_context(config: Config, database: HealthDatabase, target_date: str | N
     lean_mass = profile.get("lean_mass_kg")
     ree = estimated_ree(float(lean_mass)) if isinstance(lean_mass, (int, float)) else None
     maintenance = None
-    if ree is not None and average_active is not None and config.activity_energy_semantics == "active_only":
+    if (
+        ree is not None
+        and average_active is not None
+        and len(active_values) >= 4
+        and config.activity_energy_semantics == "active_only"
+    ):
         maintenance = planning_intake(
             ree,
             average_active,
@@ -124,7 +256,10 @@ def build_context(config: Config, database: HealthDatabase, target_date: str | N
         for row in measurements
         if "血压" in str(row.get("metric", "")) or str(row.get("unit", "")) == "mmHg"
     ]
-    all_goals = profile.get("goals", []) if isinstance(profile.get("goals", []), list) else []
+    # SQLite is canonical. A stale, malformed, or temporarily unwritable
+    # profile projection must never make a committed goal disappear from the
+    # advice context.
+    all_goals = goals
     active_goals = sorted(
         [
             goal
@@ -143,8 +278,24 @@ def build_context(config: Config, database: HealthDatabase, target_date: str | N
         and str(goal.get("effective_date") or goal.get("date") or "0001-01-01") > today
     ]
     today_workouts = [row for row in workouts if row.get("date") == today]
+    try:
+        state = json.loads((config.home_path / "state.json").read_text(encoding="utf-8"))
+        state_valid = state_validation_error(state) is None
+        if not state_valid:
+            state = {}
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        state = {}
+        state_valid = False
 
     gaps = []
+    if not profile_projection_available:
+        gaps.append(
+            "profile projection is unavailable; SQLite goals remain active and non-goal profile fields are omitted"
+        )
+    if not state_valid:
+        gaps.append(
+            "operational state is unavailable; consent and workbook projection freshness are unknown"
+        )
     if not active_goals:
         gaps.append("no explicit user goal; use WHO age/life-stage baseline")
     if future_goals:
@@ -167,6 +318,38 @@ def build_context(config: Config, database: HealthDatabase, target_date: str | N
         gaps.append(f"only {macro_coverage}/{len(foods)} food entries have complete macros; retrospective TEF is unavailable")
     if config.activity_energy_semantics == "total_energy":
         gaps.append("energy source is total_energy; do not add REE, workouts, or TEF as separate components")
+    if state.get("workbook_export_pending") is True:
+        gaps.append("SQLite contains a durable change that is not yet reflected in the Excel export")
+    if len(daily) < 14:
+        gaps.append(f"only {len(daily)}/28 dates are available for the 28-day trend")
+
+    safe_goals = [_safe_goal(goal) for goal in active_goals[:20]]
+    safe_today_foods = [_safe_food(row) for row in foods[-50:]]
+    safe_today_workouts = [
+        projected
+        for row in today_workouts[-50:]
+        if (projected := _project(row, _WORKOUT_CONTEXT_FIELDS)) is not None
+    ]
+    safe_measurements = [
+        projected
+        for row in measurements[-20:]
+        if (projected := _project(row, _MEASUREMENT_CONTEXT_FIELDS)) is not None
+    ]
+    safe_recent_bp = [
+        projected
+        for row in recent_bp[-5:]
+        if (projected := _project(row, _MEASUREMENT_CONTEXT_FIELDS)) is not None
+    ]
+    safe_daily = [
+        projected
+        for row in daily
+        if (projected := _project(row, _DAILY_CONTEXT_FIELDS)) is not None
+    ]
+    safe_workouts = [
+        projected
+        for row in workouts[-100:]
+        if (projected := _project(row, _WORKOUT_CONTEXT_FIELDS)) is not None
+    ]
 
     return {
         "generated_at": now.isoformat(timespec="seconds"),
@@ -174,33 +357,46 @@ def build_context(config: Config, database: HealthDatabase, target_date: str | N
         "day_complete": selected_date < now.date(),
         "profile": {
             "lean_mass_kg": lean_mass,
-            "age_group": profile.get("age_group"),
-            "life_stage": profile.get("life_stage"),
-            "health_constraints": profile.get("health_constraints", []),
-            "medications_affecting_exercise": profile.get(
-                "medications_affecting_exercise", []
+            "age_group": _context_scalar(profile.get("age_group")),
+            "life_stage": _context_scalar(profile.get("life_stage")),
+            "health_constraints": _context_scalar(profile.get("health_constraints", [])),
+            "medications_affecting_exercise": _context_scalar(
+                profile.get("medications_affecting_exercise", [])
             ),
-            "portion_mode": profile.get("portion_mode", "range"),
-            "active_goals": active_goals,
+            "portion_mode": _context_scalar(profile.get("portion_mode", "range")),
+            "active_goals": safe_goals,
         },
         "freshness": {
-            "latest_sync": latest,
-            "latest_successful_sync": successful,
+            "latest_sync": _safe_sync_run(latest),
+            "latest_successful_sync": _safe_sync_run(successful),
             "hours_since_success": round(freshness_hours, 2) if freshness_hours is not None else None,
             "today_data_until": today_daily.get("data_until") if today_daily else None,
+            "workbook_projection_status": "unknown"
+            if not state_valid
+            else (
+                "pending"
+                if state.get("workbook_export_pending") is True
+                else "current"
+            ),
         },
         "today": {
-            "health": today_daily,
-            "workouts": today_workouts,
-            "food_items": foods,
+            "health": _project(today_daily, _DAILY_CONTEXT_FIELDS),
+            "workouts": safe_today_workouts,
+            "food_items": safe_today_foods,
+            "food_item_count": len(foods),
             "recorded_nutrition_totals": food_totals,
             "nutrition_field_coverage": food_coverage,
-            "recent_measurements": measurements[-20:],
-            "recent_blood_pressure": recent_bp[-5:],
+            "recent_measurements": safe_measurements,
+            "recent_blood_pressure": safe_recent_bp,
         },
         "trends": {
-            "daily_28d": daily,
-            "workouts_28d": workouts,
+            "daily_28d": safe_daily,
+            "workouts_28d": safe_workouts,
+            "coverage": {
+                "daily_dates": len(daily_by_date),
+                "active_energy_completed_days": len(active_values),
+                "workout_records": len(workouts),
+            },
             "completed_7d_active_energy_values": active_values,
             "average_completed_active_energy_kcal": round(average_active, 1) if average_active is not None else None,
         },
@@ -224,6 +420,24 @@ def build_context(config: Config, database: HealthDatabase, target_date: str | N
                 "same-day values are partial; wearable energy is an estimate and must not be eaten back 1:1; "
                 "component calculations are valid only for active_only semantics"
             ),
+        },
+        "privacy": {
+            "mode": "advice_minimized",
+            "omitted": [
+                "record IDs",
+                "external IDs",
+                "original food/measurement/workout wording",
+                "image references",
+                "free-form notes",
+                "sync batch IDs",
+                "import timestamps",
+            ],
+            "limits": {
+                "food_items": 50,
+                "measurements": 20,
+                "workouts_28d": 100,
+                "text_characters": _MAX_CONTEXT_TEXT,
+            },
         },
         "data_gaps": gaps,
     }

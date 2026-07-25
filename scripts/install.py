@@ -176,6 +176,44 @@ def unique_sibling(parent: Path, prefix: str) -> Path:
     raise InstallError(f"could not allocate a temporary sibling path in: {parent}")
 
 
+def skill_backup_directory(skills_dir: Path) -> Path:
+    # Hermes recursively discovers SKILL.md below the entire skills directory,
+    # including arbitrary dot-directories. Preserve prior versions one level
+    # outside that discovery root.
+    return skills_dir.parent / f".{SKILL_NAME}-skill-backups"
+
+
+def quarantine_discoverable_backups(destination: Path, *, dry_run: bool) -> list[Path]:
+    """Move legacy adjacent Skill backups out of the host discovery root."""
+
+    parent = destination.parent
+    backup_root = skill_backup_directory(parent)
+    moved: list[Path] = []
+    legacy_hidden_root = parent / f".{SKILL_NAME}-backups"
+    candidates = [*parent.glob(f"{SKILL_NAME}.backup-*")]
+    if legacy_hidden_root.is_dir():
+        candidates.extend(legacy_hidden_root.iterdir())
+    for legacy in sorted(candidates):
+        target = backup_root / legacy.name
+        if path_exists(target):
+            target = unique_sibling(backup_root, f"{legacy.name}-")
+        log(f"Quarantine discoverable Skill backup: {legacy} -> {target}")
+        if not dry_run:
+            backup_root.mkdir(parents=True, exist_ok=True)
+            try:
+                backup_root.chmod(0o700)
+            except OSError:
+                pass
+            legacy.rename(target)
+        moved.append(target)
+    if not dry_run and legacy_hidden_root.is_dir():
+        try:
+            legacy_hidden_root.rmdir()
+        except OSError:
+            pass
+    return moved
+
+
 def validate_tree_paths(source: Path, destination: Path) -> None:
     """Reject layouts where copying or replacement could recurse into itself."""
 
@@ -354,7 +392,13 @@ def install_tree(
             if managed_runtime:
                 displaced = unique_sibling(destination.parent, f".{SKILL_NAME}.old-")
             else:
-                displaced = unique_sibling(destination.parent, f"{SKILL_NAME}.backup-")
+                backup_root = skill_backup_directory(destination.parent)
+                backup_root.mkdir(parents=True, exist_ok=True)
+                try:
+                    backup_root.chmod(0o700)
+                except OSError:
+                    pass
+                displaced = unique_sibling(backup_root, f"{SKILL_NAME}.backup-")
                 keep_displaced = True
             destination.rename(displaced)
         os.replace(staging, destination)
@@ -603,6 +647,7 @@ def main(argv: list[str] | None = None) -> int:
         log(f"Managed runtime Skill: {runtime_status}")
 
         for target in targets:
+            quarantine_discoverable_backups(target.destination, dry_run=args.dry_run)
             status = install_tree(
                 SOURCE_SKILL,
                 target.destination,
@@ -628,12 +673,19 @@ def main(argv: list[str] | None = None) -> int:
 
         # --force only controls public Skill/runtime/wrapper replacement.  It is
         # deliberately never forwarded to init, which owns private health data.
-        init_command = [str(interpreter), str(entrypoint), "--home", str(home), "init"]
-        if args.workbook:
-            init_command.extend(["--workbook", str(args.workbook.expanduser().resolve())])
-        if args.timezone:
-            init_command.extend(["--timezone", args.timezone])
-        run(init_command, dry_run=args.dry_run)
+        existing_config = home / "config.json"
+        if existing_config.is_file():
+            log(
+                "Private configuration: existing installation preserved; "
+                "run doctor after the public Skill/runtime update."
+            )
+        else:
+            init_command = [str(interpreter), str(entrypoint), "--home", str(home), "init"]
+            if args.workbook:
+                init_command.extend(["--workbook", str(args.workbook.expanduser().resolve())])
+            if args.timezone:
+                init_command.extend(["--timezone", args.timezone])
+            run(init_command, dry_run=args.dry_run)
 
     log("")
     log("Installation complete." if not args.dry_run else "Dry run complete.")
